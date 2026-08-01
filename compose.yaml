@@ -1,0 +1,537 @@
+services:
+  postgres:
+    image: postgres:16.3-alpine
+    container_name: banking-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./platform/compose/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "5432:5432"
+    networks:
+      - banking_internal
+      - banking_public
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  redpanda:
+    image: docker.redpanda.com/redpandadata/redpanda:v24.1.1
+    container_name: banking-redpanda
+    command:
+      - redpanda
+      - start
+      - --smp 1
+      - --overprovisioned
+      - --lock-memory=false
+      - --node-id 0
+      - --set redpanda.empty_seed_starts_cluster=true
+      - --set redpanda.auto_create_topics_enabled=true
+      - --kafka-addr internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr internal://redpanda:9092,external://localhost:19092
+      - --rpc-addr 0.0.0.0:33145
+      - --advertise-rpc-addr redpanda:33145
+      - --schema-registry-addr internal://0.0.0.0:8081
+      - --pandaproxy-addr internal://0.0.0.0:8082
+      - --advertise-pandaproxy-addr internal://redpanda:8082
+      - --check=false
+    ports:
+      - "19092:19092"
+      - "19644:9644"
+      - "18081:8081"
+      - "18082:8082"
+    volumes:
+      - redpanda_data:/var/lib/redpanda/data
+    networks:
+      - banking_internal
+      - banking_public
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster info --brokers localhost:9092"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+
+  redpanda-console:
+    image: docker.redpanda.com/redpandadata/console:v2.6.0
+    container_name: banking-redpanda-console
+    environment:
+      CONFIG_FILEPATH: /tmp/console-config.yml
+    volumes:
+      - ./platform/compose/redpanda/console-config.yml:/tmp/console-config.yml:ro
+    ports:
+      - "8080:8080"
+    networks:
+      - banking_internal
+      - banking_public
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    container_name: banking-prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --web.enable-lifecycle
+      - --enable-feature=remote-write-receiver
+    volumes:
+      - ./platform/observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    networks:
+      - banking_internal
+      - banking_public
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:9090/-/healthy"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  loki:
+    image: grafana/loki:2.9.2
+    container_name: banking-loki
+    command: -config.file=/etc/loki/local-config.yml
+    volumes:
+      - ./platform/observability/loki/loki-config.yml:/etc/loki/local-config.yml:ro
+      - loki_data:/loki
+    ports:
+      - "3100:3100"
+    networks:
+      - banking_internal
+      - banking_public
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:3100/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  tempo:
+    image: grafana/tempo:2.4.1
+    container_name: banking-tempo
+    command: -config.file=/etc/tempo.yml
+    volumes:
+      - ./platform/observability/tempo/tempo.yml:/etc/tempo.yml:ro
+      - tempo_data:/tmp/tempo
+    ports:
+      - "3200:3200"   # Tempo
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+    networks:
+      - banking_internal
+      - banking_public
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:3200/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:10.4.0
+    container_name: banking-grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_FEATURE_TOGGLES_ENABLE: tempoSearch tempoBackendSearch
+    volumes:
+      - ./platform/observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    networks:
+      - banking_internal
+      - banking_public
+    depends_on:
+      - prometheus
+      - loki
+      - tempo
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:3000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.102.1
+    container_name: banking-otel-collector
+    command: ["--config=/etc/otel-collector-config.yml"]
+    volumes:
+      - ./platform/observability/otel-collector/otel-config.yml:/etc/otel-collector-config.yml:ro
+    ports:
+      - "8889:8889"   # Prometheus metrics
+    networks:
+      - banking_internal
+    depends_on:
+      - prometheus
+      - loki
+      - tempo
+    restart: unless-stopped
+
+  auth-service:
+    build:
+      context: .
+      dockerfile: apps/auth-service/Dockerfile
+    container_name: banking-auth-service
+    environment:
+      PORT: 3001
+      DATABASE_HOST: postgres
+      DATABASE_PORT: 5432
+      DATABASE_USERNAME: postgres
+      DATABASE_PASSWORD: postgres
+      DATABASE_NAME: auth_db
+      DATABASE_MIGRATIONS_RUN: "true"
+      JWT_PRIVATE_KEY_PATH: ./keys/private.pem
+      JWT_PUBLIC_KEY_PATH: ./keys/public.pem
+      JWT_ACCESS_TOKEN_EXPIRATION: 15m
+      JWT_REFRESH_TOKEN_EXPIRATION: 7d
+      JWT_ISSUER: banking-auth-service
+      JWT_AUDIENCE: banking-platform
+    ports:
+      - "3001:3001"
+    networks:
+      - banking_internal
+      - banking_public
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:3001/api/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+  customer-service:
+    build:
+      context: .
+      dockerfile: apps/customer-service/Dockerfile
+    container_name: banking-customer-service
+    environment:
+      PORT: 3002
+      DATABASE_HOST: postgres
+      DATABASE_PORT: 5432
+      DATABASE_USERNAME: postgres
+      DATABASE_PASSWORD: postgres
+      DATABASE_NAME: customer_db
+      DATABASE_MIGRATIONS_RUN: "true"
+      REDPANDA_BROKERS: redpanda:9092
+      REDPANDA_CLIENT_ID: customer-service
+      REDPANDA_TOPIC_CUSTOMER_EVENTS: banking.customer.events
+      JWT_ISSUER: banking-auth-service
+      JWT_AUDIENCE: banking-platform
+    ports:
+      - "3002:3002"
+    networks:
+      - banking_internal
+      - banking_public
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:3002/api/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+  account-service:
+    build:
+      context: .
+      dockerfile: apps/account-service/Dockerfile
+    container_name: banking-account-service
+    environment:
+      PORT: 3003
+      DATABASE_HOST: postgres
+      DATABASE_PORT: 5432
+      DATABASE_USERNAME: postgres
+      DATABASE_PASSWORD: postgres
+      DATABASE_NAME: account_db
+      DATABASE_MIGRATIONS_RUN: "true"
+      REDPANDA_BROKERS: redpanda:9092
+      REDPANDA_CLIENT_ID: account-service
+      REDPANDA_TOPIC_ACCOUNT_EVENTS: banking.account.events
+      REDPANDA_TOPIC_CUSTOMER_EVENTS: banking.customer.events
+    ports:
+      - "3003:3003"
+    networks:
+      - banking_internal
+      - banking_public
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:3003/api/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+  ledger-service:
+    build:
+      context: ./apps/ledger-service
+      dockerfile: Dockerfile
+    container_name: banking-ledger-service
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/ledger_db
+      SPRING_DATASOURCE_USERNAME: postgres
+      SPRING_DATASOURCE_PASSWORD: postgres
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
+      SERVER_PORT: 3004
+    ports:
+      - "3004:3004"
+    networks:
+      - banking_internal
+      - banking_public
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:3004/api/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    restart: unless-stopped
+
+  payment-service:
+    build:
+      context: ./apps/payment-service
+      dockerfile: Dockerfile
+    container_name: banking-payment-service
+    environment:
+      DATABASE_HOST: postgres
+      DATABASE_PORT: 5432
+      DATABASE_USERNAME: postgres
+      DATABASE_PASSWORD: postgres
+      DATABASE_NAME: payment_db
+      DATABASE_MIGRATIONS_RUN: "true"
+      REDPANDA_BROKERS: redpanda:9092
+      PAYMENT_EVENTS_TOPIC: banking.payment.events
+      LEDGER_EVENTS_TOPIC: banking.ledger.events
+      LEDGER_SERVICE_URL: http://ledger-service:3004
+      LEDGER_TIMEOUT_MS: 10000
+      PORT: 3005
+    ports:
+      - "3005:3005"
+    networks:
+      - banking_internal
+      - banking_public
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:3005/api/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    restart: unless-stopped
+
+  risk-service:
+    build:
+      context: ./apps/risk-service
+      dockerfile: Dockerfile
+    container_name: banking-risk-service
+    environment:
+      DATABASE_HOST: postgres
+      DATABASE_PORT: 5432
+      DATABASE_USERNAME: postgres
+      DATABASE_PASSWORD: postgres
+      DATABASE_NAME: risk_db
+      REDPANDA_BROKERS: redpanda:9092
+      RISK_REQUESTS_TOPIC: banking.payment.risk-requests
+      RISK_EVENTS_TOPIC: banking.risk.events
+      MAX_TRANSACTION_AMOUNT_CENTS: 1000000
+      MAX_DAILY_AMOUNT_CENTS: 5000000
+      PORT: 3006
+    ports:
+      - "3006:3006"
+    networks:
+      - banking_internal
+      - banking_public
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:3006/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+  notification-service:
+    build:
+      context: .
+      dockerfile: apps/notification-service/Dockerfile
+    container_name: banking-notification-service
+    environment:
+      DATABASE_HOST: postgres
+      DATABASE_PORT: 5432
+      DATABASE_USERNAME: postgres
+      DATABASE_PASSWORD: postgres
+      DATABASE_NAME: notification_db
+      DATABASE_MIGRATIONS_RUN: "true"
+      REDPANDA_BROKERS: redpanda:9092
+      REDPANDA_CLIENT_ID: notification-service
+      REDPANDA_TOPIC_PAYMENT_EVENTS: banking.payment.events
+      REDPANDA_TOPIC_ACCOUNT_EVENTS: banking.account.events
+      REDPANDA_TOPIC_CUSTOMER_EVENTS: banking.customer.events
+      PORT: 3007
+    ports:
+      - "3007:3007"
+    networks:
+      - banking_internal
+      - banking_public
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:3007/api/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+  query-service:
+    build:
+      context: .
+      dockerfile: apps/query-service/Dockerfile
+    container_name: banking-query-service
+    environment:
+      DATABASE_HOST: postgres
+      DATABASE_PORT: 5432
+      DATABASE_USERNAME: postgres
+      DATABASE_PASSWORD: postgres
+      DATABASE_NAME: query_db
+      DATABASE_MIGRATIONS_RUN: "true"
+      REDPANDA_BROKERS: redpanda:9092
+      REDPANDA_CLIENT_ID: query-service
+      REDPANDA_TOPIC_CUSTOMER_EVENTS: banking.customer.events
+      REDPANDA_TOPIC_ACCOUNT_EVENTS: banking.account.events
+      REDPANDA_TOPIC_LEDGER_EVENTS: banking.ledger.events
+      REDPANDA_TOPIC_PAYMENT_EVENTS: banking.payment.events
+      PORT: 3008
+    ports:
+      - "3008:3008"
+    networks:
+      - banking_internal
+      - banking_public
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:3008/api/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+  api-gateway:
+    build:
+      context: .
+      dockerfile: apps/api-gateway/Dockerfile
+    container_name: banking-api-gateway
+    environment:
+      PORT: 3009
+      JWT_PUBLIC_KEY_PATH: /app/keys/public.pem
+      JWT_ISSUER: banking-auth-service
+      JWT_AUDIENCE: banking-platform
+      RATE_LIMIT_WINDOW_MS: 60000
+      RATE_LIMIT_MAX: 100
+      AUTH_SERVICE_URL: http://auth-service:3001
+      CUSTOMER_SERVICE_URL: http://customer-service:3002
+      ACCOUNT_SERVICE_URL: http://account-service:3003
+      LEDGER_SERVICE_URL: http://ledger-service:3004
+      PAYMENT_SERVICE_URL: http://payment-service:3005
+      NOTIFICATION_SERVICE_URL: http://notification-service:3007
+      QUERY_SERVICE_URL: http://query-service:3008
+    volumes:
+      - ./apps/auth-service/keys/public.pem:/app/keys/public.pem:ro
+    ports:
+      - "3009:3009"
+    networks:
+      - banking_internal
+      - banking_public
+    depends_on:
+      auth-service:
+        condition: service_healthy
+      customer-service:
+        condition: service_healthy
+      account-service:
+        condition: service_healthy
+      ledger-service:
+        condition: service_healthy
+      payment-service:
+        condition: service_healthy
+      notification-service:
+        condition: service_healthy
+      query-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:3009/api/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+    driver: local
+  redpanda_data:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local
+  loki_data:
+    driver: local
+  tempo_data:
+    driver: local
+
+networks:
+  banking_internal:
+    driver: bridge
+    internal: false
+  banking_public:
+    driver: bridge

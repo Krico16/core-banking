@@ -1,0 +1,23 @@
+# Redpanda Console configuration for local development
+kafka:
+  brokers:
+    - redpanda:9092
+  schemaRegistry:
+    enabled: true
+    urls:
+      - http://redpanda:8081
+
+redpanda:
+  adminApi:
+    enabled: true
+    urls:
+      - http://redpanda:9644
+
+connect:
+  enabled: false
+
+server:
+  listenPort: 8080
+
+logger:
+  level: info

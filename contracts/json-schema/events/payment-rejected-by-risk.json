@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://banking.local/schemas/events/payment-rejected-by-risk.json",
+  "title": "PaymentRejectedByRisk",
+  "type": "object",
+  "required": ["paymentId", "evaluationId", "riskScore", "reason", "rejectedAt"],
+  "properties": {
+    "paymentId": { "type": "string" },
+    "evaluationId": { "type": "string" },
+    "riskScore": { "type": "integer", "minimum": 0, "maximum": 100 },
+    "reason": { "type": "string", "enum": ["AMOUNT_EXCEEDS_TRANSACTION_LIMIT", "AMOUNT_EXCEEDS_DAILY_LIMIT"] },
+    "rejectedAt": { "type": "string", "format": "date-time" }
+  }
+}

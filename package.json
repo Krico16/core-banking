@@ -1,0 +1,26 @@
+{
+  "name": "banking",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Core bancario event-driven con microservicios",
+  "workspaces": [
+    "apps/*",
+    "contracts/*",
+    "libraries/*"
+  ],
+  "scripts": {
+    "up": "docker compose -f compose.yaml up -d --build",
+    "down": "docker compose -f compose.yaml down --volumes --remove-orphans",
+    "status": "docker compose -f compose.yaml ps",
+    "logs": "docker compose -f compose.yaml logs -f",
+    "lint": "cd apps/auth-service && npm run lint",
+    "test": "cd apps/auth-service && npm test",
+    "build": "docker compose -f compose.yaml build && docker build -t banking-auth-service:local -f apps/auth-service/Dockerfile . && docker build -t banking-customer-service:local -f apps/customer-service/Dockerfile . && docker build -t banking-account-service:local -f apps/account-service/Dockerfile ."
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "ecc-universal": "^2.0.0"
+  }
+}

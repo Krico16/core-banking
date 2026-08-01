@@ -1,0 +1,387 @@
+### Banking Core — Colección de peticiones HTTP
+###
+### Formato: VS Code REST Client (extensión "REST Client" de Huachao Zhan).
+### Las secciones 1-4 están encadenadas: cada `# @name` guarda la respuesta y las
+### siguientes peticiones la reutilizan (ej. {{login.response.body.$.accessToken}}).
+### Ejecutá los bloques EN ORDEN, de arriba hacia abajo, la primera vez.
+###
+### Compatible también con el HTTP Client de JetBrains (IntelliJ/WebStorm), pero ahí
+### el encadenado de variables usa otra sintaxis (`client.global.set(...)` en un
+### script de respuesta) — copiá los valores a mano si usás ese cliente.
+###
+### Todo pasa por api-gateway (localhost:3009), el único borde de la plataforma.
+### Requiere el stack completo arriba: docker compose -f compose.yaml up -d
+
+@gateway = http://localhost:3009
+
+### Email único por corrida — cambialo si volvés a ejecutar el bloque de registro
+### (auth-service rechaza emails duplicados con 409).
+#@testEmail = e2e_{{$randomInt 0 999999999}}@example.com
+@testEmail = e2e_823874494@example.com
+@testPassword = SuperSecret123!
+
+
+############################################
+# 0. Health checks (públicos, sin JWT)
+############################################
+### El gateway reenvía cada prefijo tal cual (/api/auth/*, /api/customers/*,
+### etc.), pero el HealthController de cada servicio vive en un /api/health
+### "plano", no anidado bajo su propio prefijo de recurso. Como consecuencia,
+### `{{gateway}}/api/customers/health` NO llega al healthcheck: cae en la ruta
+### @Get(':id') de CustomersController con "health" como id (401, no 404).
+### Verificado a mano contra el stack real (2026-08-01) — no asumir, probar.
+### Para chequear la salud de un servicio puntual hay que pegarle directo a su
+### puerto. La única excepción es query-service, cuyo rewrite /api/query -> /api
+### hace que sí termine pegándole a su /api/health real.
+
+### Gateway (el único que sí resuelve bien a través del propio gateway)
+GET {{gateway}}/api/health
+
+### query-service (via gateway, gracias al pathRewrite /api/query -> /api)
+GET {{gateway}}/api/query/health
+
+### El resto: directo a cada puerto (bypaseando el gateway a propósito)
+GET http://localhost:3001/api/health
+###
+GET http://localhost:3002/api/health
+###
+GET http://localhost:3003/api/health
+###
+GET http://localhost:3004/api/health
+###
+### ledger-service usa /api/ready, no /api/health/ready como los NestJS
+GET http://localhost:3004/api/ready
+###
+GET http://localhost:3005/api/health
+###
+GET http://localhost:3007/api/health
+###
+### risk-service no tiene prefijo /api ni pasa por el gateway (sin API pública)
+GET http://localhost:3006/health
+
+
+############################################
+# 1. Autenticación (auth-service)
+############################################
+
+### Registro — público, sin JWT. Devuelve { userId, email, roles }.
+# @name register
+POST {{gateway}}/api/auth/register
+Content-Type: application/json
+
+{
+  "email": "{{testEmail}}",
+  "password": "{{testPassword}}",
+  "firstName": "Ada",
+  "lastName": "Lovelace"
+}
+
+### Login — público, sin JWT. Devuelve { accessToken, refreshToken, expiresIn, tokenType }.
+# @name login
+POST {{gateway}}/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "{{testEmail}}",
+  "password": "{{testPassword}}"
+}
+
+### Perfil del usuario logueado (requiere JWT)
+GET {{gateway}}/api/auth/me
+Authorization: Bearer {{login.response.body.$.accessToken}}
+
+### Refresh — el refresh token va en el BODY, no en el header (ruta pública en el
+### gateway porque no hay Authorization: Bearer que validar ahí).
+# @name refresh
+POST {{gateway}}/api/auth/refresh
+Content-Type: application/json
+
+{
+  "refreshToken": "{{login.response.body.$.refreshToken}}"
+}
+
+### Logout de la sesión actual (invalida el refresh token usado)
+POST {{gateway}}/api/auth/logout
+Content-Type: application/json
+
+{
+  "refreshToken": "{{login.response.body.$.refreshToken}}"
+}
+
+### Logout de todas las sesiones del usuario (requiere access token)
+POST {{gateway}}/api/auth/logout-all
+Authorization: Bearer {{login.response.body.$.accessToken}}
+
+
+############################################
+# 2. Clientes (customer-service)
+############################################
+
+### Alta de cliente — el userId debe ser el que devolvió /auth/register
+# @name createCustomer
+POST {{gateway}}/api/customers
+Content-Type: application/json
+Authorization: Bearer {{login.response.body.$.accessToken}}
+
+{
+  "userId": "{{register.response.body.$.userId}}",
+  "email": "{{testEmail}}",
+  "firstName": "Ada",
+  "lastName": "Lovelace",
+  "phoneNumber": "+34600000000",
+  "country": "PE"
+}
+
+### Mi perfil de cliente (resuelve por el userId del JWT)
+# @name customerMe
+GET {{gateway}}/api/customers/me
+Authorization: Bearer {{login.response.body.$.accessToken}}
+
+### Cliente por ID
+GET {{gateway}}/api/customers/{{customerMe.response.body.$.id}}
+Authorization: Bearer {{login.response.body.$.accessToken}}
+
+### Actualizar perfil (todos los campos son opcionales)
+PUT {{gateway}}/api/customers/{{customerMe.response.body.$.id}}
+Content-Type: application/json
+Authorization: Bearer {{login.response.body.$.accessToken}}
+
+{
+  "street": "Calle Falsa 123",
+  "city": "Lima",
+  "postalCode": "28001",
+  "country": "PE"
+}
+
+### Verificar KYC — necesario antes de poder abrir cuentas (account-service
+### rechaza la apertura hasta que consume el evento CustomerVerified; puede tardar
+### un instante por la propagación vía Kafka, reintentar si da 400/409).
+# @name verifyKyc
+POST {{gateway}}/api/customers/{{customerMe.response.body.$.id}}/verify-kyc
+Authorization: Bearer {{login.response.body.$.accessToken}}
+
+### Suspender cliente (bloquea operaciones; dispara notificación)
+# POST {{gateway}}/api/customers/{{createCustomer.response.body.$.id}}/suspend
+# Content-Type: application/json
+# Authorization: Bearer {{login.response.body.$.accessToken}}
+#
+# { "reason": "Actividad sospechosa" }
+
+### Reactivar cliente suspendido
+# POST {{gateway}}/api/customers/{{createCustomer.response.body.$.id}}/reactivate
+# Authorization: Bearer {{login.response.body.$.accessToken}}
+
+
+############################################
+# 3. Cuentas (account-service)
+############################################
+
+### Abrir cuenta corriente (origen de la transferencia de la sección 5)
+# @name openAccountA
+POST {{gateway}}/api/accounts
+Content-Type: application/json
+Authorization: Bearer {{login.response.body.$.accessToken}}
+
+{
+  "customerId": "{{customerMe.response.body.$.id}}",
+  "accountType": "CHECKING",
+  "currency": "PEN",
+  "dailyLimitAmount": 1000000,
+  "transactionLimitAmount": 500000
+}
+
+### Abrir cuenta de ahorro (destino de la transferencia de la sección 5)
+# @name openAccountB
+POST {{gateway}}/api/accounts
+Content-Type: application/json
+Authorization: Bearer {{login.response.body.$.accessToken}}
+
+{
+  "customerId": "{{customerMe.response.body.$.id}}",
+  "accountType": "SAVINGS",
+  "currency": "EUR",
+  "dailyLimitAmount": 1000000,
+  "transactionLimitAmount": 500000
+}
+
+### Cuenta por ID
+GET {{gateway}}/api/accounts/{{openAccountA.response.body.$.id}}
+Authorization: Bearer {{login.response.body.$.accessToken}}
+
+### Todas las cuentas de un cliente
+GET {{gateway}}/api/accounts/customer/{{customerMe.response.body.$.id}}
+Authorization: Bearer {{login.response.body.$.accessToken}}
+
+### Congelar cuenta
+# POST {{gateway}}/api/accounts/{{openAccountA.response.body.$.id}}/freeze
+# Content-Type: application/json
+# Authorization: Bearer {{login.response.body.$.accessToken}}
+#
+# { "reason": "Revisión manual" }
+
+### Descongelar cuenta
+# POST {{gateway}}/api/accounts/{{openAccountA.response.body.$.id}}/unfreeze
+# Authorization: Bearer {{login.response.body.$.accessToken}}
+
+
+############################################
+# 4. Ledger — partida doble (ledger-service, Java)
+############################################
+### Normalmente estas operaciones las orquesta payment-service internamente.
+### Se exponen igual vía gateway para depósitos externos (fondeo) y consulta de
+### saldo. IMPORTANTE: acá el monto es DECIMAL (BigDecimal, ej. 500.00 = 500 EUR),
+### a diferencia de payment-service donde el monto va en CENTAVOS.
+
+### Depositar fondos en la cuenta A (necesario antes de poder transferir —
+### las cuentas nuevas arrancan en saldo 0). requiere Idempotency-Key.
+# @name deposit
+POST {{gateway}}/api/ledger/deposit
+Content-Type: application/json
+Authorization: Bearer {{login.response.body.$.accessToken}}
+Idempotency-Key: dep-{{$guid}}
+
+{
+  "accountId": "{{openAccountA.response.body.$.id}}",
+  "amount": 128.10,
+  "currency": "PEN",
+  "description": "Fondeo inicial de prueba"
+}
+
+### Saldo de la cuenta A
+GET {{gateway}}/api/ledger/accounts/{{openAccountA.response.body.$.id}}/balance
+Authorization: Bearer {{login.response.body.$.accessToken}}
+
+### Saldo de la cuenta B
+GET {{gateway}}/api/ledger/accounts/{{openAccountB.response.body.$.id}}/balance
+Authorization: Bearer {{login.response.body.$.accessToken}}
+
+### Retirar fondos (requiere Idempotency-Key)
+# POST {{gateway}}/api/ledger/withdraw
+# Content-Type: application/json
+# Authorization: Bearer {{login.response.body.$.accessToken}}
+# Idempotency-Key: wd-{{$guid}}
+#
+# {
+#   "accountId": "{{openAccountA.response.body.$.id}}",
+#   "amount": 50.00,
+#   "currency": "EUR",
+#   "description": "Retiro de prueba"
+# }
+
+### Reversar un asiento por su journalEntryId (nunca se edita un asiento, solo se
+### reversa — regla de negocio nº3)
+# POST {{gateway}}/api/ledger/reverse
+# Content-Type: application/json
+# Authorization: Bearer {{login.response.body.$.accessToken}}
+# Idempotency-Key: rev-{{$guid}}
+#
+# {
+#   "originalEntryId": "PEGAR_journalEntryId_ACA",
+#   "reason": "Corrección de prueba"
+# }
+
+### Monedas soportadas
+GET {{gateway}}/api/ledger/currencies
+Authorization: Bearer {{login.response.body.$.accessToken}}
+
+
+############################################
+# 5. Pagos / transferencias (payment-service + saga de riesgo)
+############################################
+### El monto va en CENTAVOS (entero). El límite por transacción de risk-service
+### es 1,000,000 centavos ($10,000) y el diario acumulado 5,000,000 ($50,000) por
+### defecto — un monto mayor termina en status FAILED con
+### failureReason=AMOUNT_EXCEEDS_TRANSACTION_LIMIT / AMOUNT_EXCEEDS_DAILY_LIMIT.
+###
+### NOTA: el DTO exige `idempotencyKey` tanto en el header `Idempotency-Key` como
+### en el body — mandalos iguales.
+
+### Crear transferencia A -> B (100.00 EUR = 10000 centavos). La saga corre async:
+### CREATED -> VALIDATING -> RISK_REVIEW -> AUTHORIZED -> POSTING -> COMPLETED
+### (o FAILED si el riesgo la rechaza o el ledger falla).
+### {{$guid}} se resuelve una sola vez al definir @payKey, así el header y el
+### body quedan con el mismo valor (si se repite {{$guid}} inline en dos lugares
+### de la misma petición, cada uno genera un GUID distinto).
+@payKey = pay-{{$guid}}
+
+# @name transfer
+POST {{gateway}}/api/payments/transfer
+Content-Type: application/json
+Authorization: Bearer {{login.response.body.$.accessToken}}
+Idempotency-Key: {{payKey}}
+
+{
+  "idempotencyKey": "{{payKey}}",
+  "sourceAccountId": "{{openAccountA.response.body.$.id}}",
+  "targetAccountId": "{{openAccountB.response.body.$.id}}",
+  "amount": 10000,
+  "currency": "EUR",
+  "description": "Transferencia de prueba"
+}
+
+### Estado del pago — repetir hasta ver status COMPLETED (o FAILED con failureReason)
+GET {{gateway}}/api/payments/{{transfer.response.body.$.id}}
+Authorization: Bearer {{login.response.body.$.accessToken}}
+
+### Reversar un pago completado (compensa también en el ledger)
+# POST {{gateway}}/api/payments/{{transfer.response.body.$.id}}/reverse
+# Content-Type: application/json
+# Authorization: Bearer {{login.response.body.$.accessToken}}
+#
+# { "reason": "Reembolso solicitado por el cliente" }
+
+### --- Endpoints internos (uso normal: el propio saga los llama, no un cliente) ---
+
+### Completar pago manualmente (dev/soporte)
+# POST {{gateway}}/api/payments/{{transfer.response.body.$.id}}/complete
+# Content-Type: application/json
+# Authorization: Bearer {{login.response.body.$.accessToken}}
+#
+# { "ledgerEntryId": "PEGAR_journalEntryId_ACA" }
+
+### Marcar pago como fallido manualmente (dev/soporte)
+# POST {{gateway}}/api/payments/{{transfer.response.body.$.id}}/fail
+# Content-Type: application/json
+# Authorization: Bearer {{login.response.body.$.accessToken}}
+#
+# { "reason": "Motivo manual" }
+
+### Avanzar el pago al siguiente estado (solo NODE_ENV != production)
+# POST {{gateway}}/api/payments/{{transfer.response.body.$.id}}/advance
+# Authorization: Bearer {{login.response.body.$.accessToken}}
+
+
+############################################
+# 6. Consultas — proyecciones CQRS (query-service, vía /api/query/*)
+############################################
+### Eventualmente consistentes (llegan por Kafka) — si acabás de transferir,
+### puede tardar un instante en reflejarse acá. Para el estado autoritativo e
+### inmediato de una cuenta o pago, usá las secciones 3/5 en su lugar.
+
+### Vista de cuenta A (proyección, incluye saldo)
+GET {{gateway}}/api/query/accounts/{{openAccountA.response.body.$.id}}
+Authorization: Bearer {{login.response.body.$.accessToken}}
+
+### Historial de movimientos de la cuenta A
+GET {{gateway}}/api/query/accounts/{{openAccountA.response.body.$.id}}/transactions
+Authorization: Bearer {{login.response.body.$.accessToken}}
+
+### Vista del pago (proyección)
+GET {{gateway}}/api/query/payments/{{transfer.response.body.$.id}}
+Authorization: Bearer {{login.response.body.$.accessToken}}
+
+### Dashboard del cliente (incluye lista de sus cuentas con saldo)
+GET {{gateway}}/api/query/customers/{{customerMe.response.body.$.id}}/dashboard
+Authorization: Bearer {{login.response.body.$.accessToken}}
+
+
+############################################
+# 7. Notificaciones (notification-service)
+############################################
+### Canal único hoy: LOG (simulado, no envía email/SMS real). subjectId es el
+### paymentId (PaymentCompleted/Rejected) o el customerId (AccountOpened/
+### CustomerSuspended) según el evento que la generó.
+
+### Notificaciones sobre el pago de la sección 5
+GET {{gateway}}/api/notifications/{{transfer.response.body.$.id}}
+Authorization: Bearer {{login.response.body.$.accessToken}}

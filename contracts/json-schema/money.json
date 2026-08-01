@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://banking.local/schemas/money.json",
+  "title": "Money",
+  "description": "Representación de dinero: monto en centavos + código de moneda ISO 4217",
+  "type": "object",
+  "required": ["amount", "currency"],
+  "properties": {
+    "amount": {
+      "type": "integer",
+      "description": "Monto en unidades mínimas de la moneda (centavos para EUR/USD)"
+    },
+    "currency": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 3,
+      "description": "Código ISO 4217"
+    }
+  }
+}

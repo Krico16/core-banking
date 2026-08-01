@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://banking.local/schemas/events/ledger-transaction-rejected.json",
+  "title": "LedgerTransactionRejected",
+  "type": "object",
+  "description": "Emitted when a deposit/withdraw/transfer/reverse posting attempt fails domain validation (insufficient funds, currency mismatch, account not found, etc). No journal entry exists for a rejected attempt — accountId identifies the account the attempt was made against (sourceAccountId for transfers).",
+  "required": ["accountId", "idempotencyKey", "reason", "rejectedAt"],
+  "properties": {
+    "accountId": { "type": "string" },
+    "idempotencyKey": { "type": "string" },
+    "reason": { "type": "string" },
+    "rejectedAt": { "type": "string", "format": "date-time" }
+  }
+}

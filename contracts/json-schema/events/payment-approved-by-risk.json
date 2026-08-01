@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://banking.local/schemas/events/payment-approved-by-risk.json",
+  "title": "PaymentApprovedByRisk",
+  "type": "object",
+  "required": ["paymentId", "evaluationId", "riskScore", "approvedAt"],
+  "properties": {
+    "paymentId": { "type": "string" },
+    "evaluationId": { "type": "string" },
+    "riskScore": { "type": "integer", "minimum": 0, "maximum": 100 },
+    "approvedAt": { "type": "string", "format": "date-time" }
+  }
+}

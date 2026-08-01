@@ -1,0 +1,27 @@
+# Build
+/dist
+/node_modules
+
+# Logs
+*.log
+npm-debug.log*
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Keys
+/keys/*.pem
+
+# IDE
+.idea
+.vscode
+*.iml
+
+# Test coverage
+/coverage
+
+# Misc
+.DS_Store
+Thumbs.db

@@ -1,0 +1,563 @@
+asyncapi: 3.0.0
+info:
+  title: Banking Core Events
+  version: 0.1.0
+  description: Catálogo de eventos del core bancario event-driven
+  contact:
+    name: Banking Platform Team
+
+defaultContentType: application/json
+
+servers:
+  redpanda:
+    host: redpanda:9092
+    protocol: kafka
+    description: Redpanda broker (protocolo Kafka)
+
+channels:
+  banking.customer.events:
+    address: banking.customer.events
+    messages:
+      CustomerRegistered:
+        $ref: '#/components/messages/CustomerRegistered'
+      CustomerVerified:
+        $ref: '#/components/messages/CustomerVerified'
+      CustomerSuspended:
+        $ref: '#/components/messages/CustomerSuspended'
+      CustomerContactUpdated:
+        $ref: '#/components/messages/CustomerContactUpdated'
+    description: Eventos del customer context
+
+  banking.account.events:
+    address: banking.account.events
+    messages:
+      AccountOpened:
+        $ref: '#/components/messages/AccountOpened'
+      AccountFrozen:
+        $ref: '#/components/messages/AccountFrozen'
+      AccountClosed:
+        $ref: '#/components/messages/AccountClosed'
+    description: Eventos del account context
+
+  banking.ledger.events:
+    address: banking.ledger.events
+    messages:
+      LedgerTransactionPosted:
+        $ref: '#/components/messages/LedgerTransactionPosted'
+      LedgerTransactionRejected:
+        $ref: '#/components/messages/LedgerTransactionRejected'
+      LedgerTransactionReversed:
+        $ref: '#/components/messages/LedgerTransactionReversed'
+      AccountBalanceChanged:
+        $ref: '#/components/messages/AccountBalanceChanged'
+    description: >
+      Eventos del ledger context (crítico). FundsHeld/FundsReleased se removieron de este
+      canal: eran diseño de fase 0 (hold/capture) que el saga ratificado en ADR-006 no usa
+      (postea directo). Sus mensajes siguen definidos en components.messages/schemas por
+      completitud histórica, pero no tienen productor ni consumidor real — ver
+      docs/events/catalog.md.
+
+  banking.payment.events:
+    address: banking.payment.events
+    messages:
+      PaymentCreated:
+        $ref: '#/components/messages/PaymentCreated'
+      PaymentAuthorized:
+        $ref: '#/components/messages/PaymentAuthorized'
+      PaymentRejected:
+        $ref: '#/components/messages/PaymentRejected'
+      PaymentCompleted:
+        $ref: '#/components/messages/PaymentCompleted'
+      PaymentFailed:
+        $ref: '#/components/messages/PaymentFailed'
+      PaymentReversed:
+        $ref: '#/components/messages/PaymentReversed'
+    description: Eventos del payment context
+
+  banking.payment.risk-requests:
+    address: banking.payment.risk-requests
+    messages:
+      PaymentRiskEvaluationRequested:
+        $ref: '#/components/messages/PaymentRiskEvaluationRequested'
+    description: Solicitudes de evaluación de riesgo
+
+  banking.payment.reversal-requests:
+    address: banking.payment.reversal-requests
+    messages:
+      PaymentReversalRequested:
+        $ref: '#/components/messages/PaymentReversalRequested'
+    description: Solicitudes de reversión
+
+  banking.risk.events:
+    address: banking.risk.events
+    messages:
+      PaymentApprovedByRisk:
+        $ref: '#/components/messages/PaymentApprovedByRisk'
+      PaymentRejectedByRisk:
+        $ref: '#/components/messages/PaymentRejectedByRisk'
+      PaymentFlaggedForReview:
+        $ref: '#/components/messages/PaymentFlaggedForReview'
+    description: Respuestas del risk context
+
+operations:
+  onCustomerEvent:
+    action: receive
+    channel:
+      $ref: '#/channels/banking.customer.events'
+    messages:
+      - $ref: '#/components/messages/CustomerRegistered'
+      - $ref: '#/components/messages/CustomerVerified'
+      - $ref: '#/components/messages/CustomerSuspended'
+      - $ref: '#/components/messages/CustomerContactUpdated'
+
+  onAccountEvent:
+    action: receive
+    channel:
+      $ref: '#/channels/banking.account.events'
+    messages:
+      - $ref: '#/components/messages/AccountOpened'
+      - $ref: '#/components/messages/AccountFrozen'
+      - $ref: '#/components/messages/AccountClosed'
+
+  onLedgerEvent:
+    action: receive
+    channel:
+      $ref: '#/channels/banking.ledger.events'
+    messages:
+      - $ref: '#/components/messages/LedgerTransactionPosted'
+      - $ref: '#/components/messages/LedgerTransactionRejected'
+      - $ref: '#/components/messages/LedgerTransactionReversed'
+      - $ref: '#/components/messages/AccountBalanceChanged'
+
+  onPaymentEvent:
+    action: receive
+    channel:
+      $ref: '#/channels/banking.payment.events'
+    messages:
+      - $ref: '#/components/messages/PaymentCreated'
+      - $ref: '#/components/messages/PaymentAuthorized'
+      - $ref: '#/components/messages/PaymentRejected'
+      - $ref: '#/components/messages/PaymentCompleted'
+      - $ref: '#/components/messages/PaymentFailed'
+      - $ref: '#/components/messages/PaymentReversed'
+
+  onRiskRequest:
+    action: receive
+    channel:
+      $ref: '#/channels/banking.payment.risk-requests'
+    messages:
+      - $ref: '#/components/messages/PaymentRiskEvaluationRequested'
+
+  onReversalRequest:
+    action: receive
+    channel:
+      $ref: '#/channels/banking.payment.reversal-requests'
+    messages:
+      - $ref: '#/components/messages/PaymentReversalRequested'
+
+  onRiskEvent:
+    action: receive
+    channel:
+      $ref: '#/channels/banking.risk.events'
+    messages:
+      - $ref: '#/components/messages/PaymentApprovedByRisk'
+      - $ref: '#/components/messages/PaymentRejectedByRisk'
+      - $ref: '#/components/messages/PaymentFlaggedForReview'
+
+components:
+  messages:
+    EventEnvelope:
+      summary: Envelope estándar de evento
+      payload:
+        type: object
+        required: [eventId, eventType, eventVersion, occurredAt, producer, correlationId, causationId, subjectId, data]
+        properties:
+          eventId:
+            type: string
+            description: ULID único del evento
+          eventType:
+            type: string
+            description: Nombre del evento en PascalCase
+          eventVersion:
+            type: integer
+            minimum: 1
+            description: Versión del schema del evento
+          occurredAt:
+            type: string
+            format: date-time
+            description: ISO 8601 timestamp de ocurrencia
+          producer:
+            type: string
+            description: Servicio productor del evento
+          correlationId:
+            type: string
+            description: ULID que agrupa toda la operación de negocio
+          causationId:
+            type: string
+            description: ULID del evento que causó este
+          subjectId:
+            type: string
+            description: ID del recurso principal afectado
+          traceId:
+            type: string
+            description: OpenTelemetry trace ID
+          data:
+            type: object
+            description: Payload específico del evento
+
+    CustomerRegistered:
+      payload:
+        $ref: '#/components/schemas/CustomerRegisteredPayload'
+    CustomerVerified:
+      payload:
+        $ref: '#/components/schemas/CustomerVerifiedPayload'
+    CustomerSuspended:
+      payload:
+        $ref: '#/components/schemas/CustomerSuspendedPayload'
+    CustomerContactUpdated:
+      payload:
+        $ref: '#/components/schemas/CustomerContactUpdatedPayload'
+    AccountOpened:
+      payload:
+        $ref: '#/components/schemas/AccountOpenedPayload'
+    AccountFrozen:
+      payload:
+        $ref: '#/components/schemas/AccountFrozenPayload'
+    AccountClosed:
+      payload:
+        $ref: '#/components/schemas/AccountClosedPayload'
+    FundsHeld:
+      payload:
+        $ref: '#/components/schemas/FundsHeldPayload'
+    FundsReleased:
+      payload:
+        $ref: '#/components/schemas/FundsReleasedPayload'
+    LedgerTransactionPosted:
+      payload:
+        $ref: '#/components/schemas/LedgerTransactionPostedPayload'
+    LedgerTransactionRejected:
+      payload:
+        $ref: '#/components/schemas/LedgerTransactionRejectedPayload'
+    LedgerTransactionReversed:
+      payload:
+        $ref: '#/components/schemas/LedgerTransactionReversedPayload'
+    AccountBalanceChanged:
+      payload:
+        $ref: '#/components/schemas/AccountBalanceChangedPayload'
+    PaymentCreated:
+      payload:
+        $ref: '#/components/schemas/PaymentCreatedPayload'
+    PaymentRiskEvaluationRequested:
+      payload:
+        $ref: '#/components/schemas/PaymentRiskEvaluationRequestedPayload'
+    PaymentAuthorized:
+      payload:
+        $ref: '#/components/schemas/PaymentAuthorizedPayload'
+    PaymentRejected:
+      payload:
+        $ref: '#/components/schemas/PaymentRejectedPayload'
+    PaymentCompleted:
+      payload:
+        $ref: '#/components/schemas/PaymentCompletedPayload'
+    PaymentFailed:
+      payload:
+        $ref: '#/components/schemas/PaymentFailedPayload'
+    PaymentReversalRequested:
+      payload:
+        $ref: '#/components/schemas/PaymentReversalRequestedPayload'
+    PaymentReversed:
+      payload:
+        $ref: '#/components/schemas/PaymentReversedPayload'
+    PaymentApprovedByRisk:
+      payload:
+        $ref: '#/components/schemas/PaymentApprovedByRiskPayload'
+    PaymentRejectedByRisk:
+      payload:
+        $ref: '#/components/schemas/PaymentRejectedByRiskPayload'
+    PaymentFlaggedForReview:
+      payload:
+        $ref: '#/components/schemas/PaymentFlaggedForReviewPayload'
+
+  schemas:
+    Money:
+      type: object
+      required: [amount, currency]
+      properties:
+        amount:
+          type: integer
+          format: int64
+          description: Monto en centavos (unidades mínimas de la moneda)
+        currency:
+          type: string
+          minLength: 3
+          maxLength: 3
+          description: Código ISO 4217
+
+    LedgerEntry:
+      type: object
+      required: [accountId, type, amount, currency]
+      properties:
+        accountId:
+          type: string
+        type:
+          type: string
+          enum: [DEBIT, CREDIT]
+        amount:
+          type: integer
+          format: int64
+        currency:
+          type: string
+
+    CustomerRegisteredPayload:
+      type: object
+      required: [customerId, userId, email, country]
+      properties:
+        customerId: { type: string }
+        userId: { type: string }
+        email: { type: string, format: email }
+        firstName: { type: string }
+        lastName: { type: string }
+        country: { type: string, minLength: 2, maxLength: 2 }
+
+    CustomerVerifiedPayload:
+      type: object
+      required: [customerId, verifiedAt, verificationMethod]
+      properties:
+        customerId: { type: string }
+        verifiedAt: { type: string, format: date-time }
+        verificationMethod: { type: string, enum: [DOCUMENT, VIDEO, AUTO] }
+
+    CustomerSuspendedPayload:
+      type: object
+      required: [customerId, reason, suspendedAt]
+      properties:
+        customerId: { type: string }
+        reason: { type: string }
+        suspendedAt: { type: string, format: date-time }
+
+    CustomerContactUpdatedPayload:
+      type: object
+      required: [customerId, changedFields, updatedAt]
+      properties:
+        customerId: { type: string }
+        changedFields:
+          type: array
+          items: { type: string }
+        updatedAt: { type: string, format: date-time }
+
+    AccountOpenedPayload:
+      type: object
+      required: [accountId, customerId, accountNumber, accountType, currency, openedAt]
+      properties:
+        accountId: { type: string }
+        customerId: { type: string }
+        accountNumber: { type: string }
+        accountType: { type: string, enum: [CHECKING, SAVINGS] }
+        currency: { type: string }
+        openedAt: { type: string, format: date-time }
+
+    AccountFrozenPayload:
+      type: object
+      required: [accountId, reason, frozenAt, frozenBy]
+      properties:
+        accountId: { type: string }
+        reason: { type: string }
+        frozenAt: { type: string, format: date-time }
+        frozenBy: { type: string }
+
+    AccountClosedPayload:
+      type: object
+      required: [accountId, closedAt, reason]
+      properties:
+        accountId: { type: string }
+        closedAt: { type: string, format: date-time }
+        reason: { type: string }
+
+    FundsHeldPayload:
+      type: object
+      required: [accountId, holdId, amount, currency, paymentId, heldAt]
+      properties:
+        accountId: { type: string }
+        holdId: { type: string }
+        amount: { type: integer, format: int64 }
+        currency: { type: string }
+        paymentId: { type: string }
+        heldAt: { type: string, format: date-time }
+
+    FundsReleasedPayload:
+      type: object
+      required: [accountId, holdId, amount, currency, paymentId, releasedAt]
+      properties:
+        accountId: { type: string }
+        holdId: { type: string }
+        amount: { type: integer, format: int64 }
+        currency: { type: string }
+        paymentId: { type: string }
+        releasedAt: { type: string, format: date-time }
+
+    LedgerTransactionPostedPayload:
+      type: object
+      required: [entryId, paymentId, sourceAccountId, targetAccountId, amount, currency, entryType, entries, postedAt]
+      properties:
+        entryId: { type: string }
+        paymentId: { type: string }
+        sourceAccountId: { type: string }
+        targetAccountId: { type: string }
+        amount: { type: integer, format: int64 }
+        currency: { type: string }
+        entryType: { type: string, enum: [DEPOSIT, WITHDRAWAL, TRANSFER, REVERSAL, FEE] }
+        entries:
+          type: array
+          items:
+            $ref: '#/components/schemas/LedgerEntry'
+        postedAt: { type: string, format: date-time }
+
+    LedgerTransactionRejectedPayload:
+      type: object
+      required: [paymentId, reason, sourceAccountId, targetAccountId, amount, currency, rejectedAt]
+      properties:
+        paymentId: { type: string }
+        reason: { type: string }
+        sourceAccountId: { type: string }
+        targetAccountId: { type: string }
+        amount: { type: integer, format: int64 }
+        currency: { type: string }
+        rejectedAt: { type: string, format: date-time }
+
+    LedgerTransactionReversedPayload:
+      type: object
+      required: [originalEntryId, reversalEntryId, paymentId, reason, amount, currency, reversedAt]
+      properties:
+        originalEntryId: { type: string }
+        reversalEntryId: { type: string }
+        paymentId: { type: string }
+        reason: { type: string }
+        amount: { type: integer, format: int64 }
+        currency: { type: string }
+        reversedAt: { type: string, format: date-time }
+
+    AccountBalanceChangedPayload:
+      type: object
+      required: [accountId, previousBalance, newBalance, delta, currency, entryId, changedAt]
+      properties:
+        accountId: { type: string }
+        previousBalance: { type: integer, format: int64 }
+        newBalance: { type: integer, format: int64 }
+        delta: { type: integer, format: int64 }
+        currency: { type: string }
+        entryId: { type: string }
+        changedAt: { type: string, format: date-time }
+
+    PaymentCreatedPayload:
+      type: object
+      required: [paymentId, idempotencyKey, sourceAccountId, targetAccountId, amount, currency, description, initiatedBy, createdAt]
+      properties:
+        paymentId: { type: string }
+        idempotencyKey: { type: string }
+        sourceAccountId: { type: string }
+        targetAccountId: { type: string }
+        amount: { type: integer, format: int64 }
+        currency: { type: string }
+        description: { type: string }
+        initiatedBy: { type: string }
+        createdAt: { type: string, format: date-time }
+
+    PaymentRiskEvaluationRequestedPayload:
+      type: object
+      required: [paymentId, sourceCustomerId, targetCustomerId, sourceAccountId, targetAccountId, amount, currency, requestedAt]
+      properties:
+        paymentId: { type: string }
+        sourceCustomerId: { type: string }
+        targetCustomerId: { type: string }
+        sourceAccountId: { type: string }
+        targetAccountId: { type: string }
+        amount: { type: integer, format: int64 }
+        currency: { type: string }
+        requestedAt: { type: string, format: date-time }
+
+    PaymentAuthorizedPayload:
+      type: object
+      required: [paymentId, authorizedAt]
+      properties:
+        paymentId: { type: string }
+        authorizedAt: { type: string, format: date-time }
+
+    PaymentRejectedPayload:
+      type: object
+      required: [paymentId, reason, rejectedAt]
+      properties:
+        paymentId: { type: string }
+        reason: { type: string }
+        rejectedAt: { type: string, format: date-time }
+
+    PaymentCompletedPayload:
+      type: object
+      required: [paymentId, sourceAccountId, targetAccountId, amount, currency, entryId, completedAt]
+      properties:
+        paymentId: { type: string }
+        sourceAccountId: { type: string }
+        targetAccountId: { type: string }
+        amount: { type: integer, format: int64 }
+        currency: { type: string }
+        entryId: { type: string }
+        completedAt: { type: string, format: date-time }
+
+    PaymentFailedPayload:
+      type: object
+      required: [paymentId, reason, failedAt]
+      properties:
+        paymentId: { type: string }
+        reason: { type: string }
+        failedAt: { type: string, format: date-time }
+
+    PaymentReversalRequestedPayload:
+      type: object
+      required: [paymentId, entryId, reason, requestedAt]
+      properties:
+        paymentId: { type: string }
+        entryId: { type: string }
+        reason: { type: string }
+        requestedAt: { type: string, format: date-time }
+
+    PaymentReversedPayload:
+      type: object
+      required: [paymentId, reversalEntryId, reversedAt]
+      properties:
+        paymentId: { type: string }
+        reversalEntryId: { type: string }
+        reversedAt: { type: string, format: date-time }
+
+    PaymentApprovedByRiskPayload:
+      type: object
+      required: [paymentId, evaluationId, riskScore, approvedAt]
+      properties:
+        paymentId: { type: string }
+        evaluationId: { type: string }
+        riskScore: { type: integer, minimum: 0, maximum: 100 }
+        approvedAt: { type: string, format: date-time }
+
+    PaymentRejectedByRiskPayload:
+      type: object
+      required: [paymentId, evaluationId, riskScore, flags, rejectedAt]
+      properties:
+        paymentId: { type: string }
+        evaluationId: { type: string }
+        riskScore: { type: integer, minimum: 0, maximum: 100 }
+        flags:
+          type: array
+          items:
+            type: string
+            enum: [HIGH_AMOUNT, VELOCITY, NEW_RECIPIENT, BLOCKED_ACCOUNT, SUSPICIOUS_PATTERN]
+        rejectedAt: { type: string, format: date-time }
+
+    PaymentFlaggedForReviewPayload:
+      type: object
+      required: [paymentId, evaluationId, riskScore, flags, flaggedAt]
+      properties:
+        paymentId: { type: string }
+        evaluationId: { type: string }
+        riskScore: { type: integer, minimum: 0, maximum: 100 }
+        flags:
+          type: array
+          items: { type: string }
+        flaggedAt: { type: string, format: date-time }

@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://banking.local/schemas/events/account-opened.json",
+  "title": "AccountOpened",
+  "type": "object",
+  "required": ["accountId", "customerId", "accountNumber", "accountType", "currency", "openedAt"],
+  "properties": {
+    "accountId": { "type": "string" },
+    "customerId": { "type": "string" },
+    "accountNumber": { "type": "string" },
+    "accountType": { "type": "string", "enum": ["CHECKING", "SAVINGS"] },
+    "currency": { "type": "string" },
+    "openedAt": { "type": "string", "format": "date-time" }
+  }
+}

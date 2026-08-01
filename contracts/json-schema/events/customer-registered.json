@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://banking.local/schemas/events/customer-registered.json",
+  "title": "CustomerRegistered",
+  "type": "object",
+  "required": ["customerId", "userId", "email", "country"],
+  "properties": {
+    "customerId": { "type": "string" },
+    "userId": { "type": "string" },
+    "email": { "type": "string", "format": "email" },
+    "firstName": { "type": "string" },
+    "lastName": { "type": "string" },
+    "country": { "type": "string", "minLength": 2, "maxLength": 2 }
+  }
+}

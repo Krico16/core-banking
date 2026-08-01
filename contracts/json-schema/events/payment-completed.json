@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://banking.local/schemas/events/payment-completed.json",
+  "title": "PaymentCompleted",
+  "type": "object",
+  "required": ["paymentId", "idempotencyKey", "sourceAccountId", "targetAccountId", "amount", "currency", "initiatedBy", "status", "ledgerEntryId", "createdAt", "updatedAt", "completedAt"],
+  "properties": {
+    "paymentId": { "type": "string" },
+    "idempotencyKey": { "type": "string" },
+    "sourceAccountId": { "type": "string" },
+    "targetAccountId": { "type": "string" },
+    "amount": { "type": "integer", "description": "Monto en centavos" },
+    "currency": { "type": "string", "minLength": 3, "maxLength": 3 },
+    "description": { "type": ["string", "null"] },
+    "initiatedBy": { "type": "string" },
+    "status": { "type": "string" },
+    "ledgerEntryId": { "type": "string" },
+    "failureReason": { "type": ["string", "null"] },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "updatedAt": { "type": "string", "format": "date-time" },
+    "completedAt": { "type": "string", "format": "date-time" },
+    "reversedAt": { "type": ["string", "null"], "format": "date-time" }
+  }
+}

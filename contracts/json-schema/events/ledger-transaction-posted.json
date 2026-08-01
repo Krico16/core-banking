@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://banking.local/schemas/events/ledger-transaction-posted.json",
+  "title": "LedgerTransactionPosted",
+  "type": "object",
+  "required": ["entryId", "paymentId", "sourceAccountId", "targetAccountId", "amount", "currency", "entryType", "entries", "postedAt"],
+  "properties": {
+    "entryId": { "type": "string" },
+    "paymentId": { "type": "string" },
+    "sourceAccountId": { "type": "string" },
+    "targetAccountId": { "type": "string" },
+    "amount": { "type": "integer", "description": "Monto en centavos" },
+    "currency": { "type": "string", "minLength": 3, "maxLength": 3 },
+    "entryType": { "type": "string", "enum": ["DEPOSIT", "WITHDRAWAL", "TRANSFER", "REVERSAL", "FEE"] },
+    "entries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["accountId", "type", "amount", "currency"],
+        "properties": {
+          "accountId": { "type": "string" },
+          "type": { "type": "string", "enum": ["DEBIT", "CREDIT"] },
+          "amount": { "type": "integer" },
+          "currency": { "type": "string" }
+        }
+      },
+      "minItems": 2
+    },
+    "postedAt": { "type": "string", "format": "date-time" }
+  }
+}

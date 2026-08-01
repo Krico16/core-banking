@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://banking.local/schemas/event-envelope.json",
+  "title": "EventEnvelope",
+  "description": "Envelope estándar para todos los eventos del core bancario",
+  "type": "object",
+  "required": [
+    "eventId",
+    "eventType",
+    "eventVersion",
+    "occurredAt",
+    "producer",
+    "correlationId",
+    "causationId",
+    "subjectId",
+    "data"
+  ],
+  "properties": {
+    "eventId": {
+      "type": "string",
+      "description": "Identificador único del evento (ULID)"
+    },
+    "eventType": {
+      "type": "string",
+      "description": "Nombre del evento en PascalCase"
+    },
+    "eventVersion": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Versión del schema del evento"
+    },
+    "occurredAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 timestamp de ocurrencia"
+    },
+    "producer": {
+      "type": "string",
+      "description": "Servicio que publicó el evento"
+    },
+    "correlationId": {
+      "type": "string",
+      "description": "ULID que agrupa toda la operación de negocio"
+    },
+    "causationId": {
+      "type": "string",
+      "description": "ULID del evento que causó este"
+    },
+    "subjectId": {
+      "type": "string",
+      "description": "ID del recurso principal afectado"
+    },
+    "traceId": {
+      "type": "string",
+      "description": "OpenTelemetry trace ID"
+    },
+    "data": {
+      "type": "object",
+      "description": "Payload específico del evento"
+    }
+  }
+}
