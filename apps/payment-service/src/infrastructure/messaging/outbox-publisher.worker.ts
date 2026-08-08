@@ -3,6 +3,7 @@ import { Interval } from '@nestjs/schedule';
 import { ConfigService } from '@nestjs/config';
 import { DataSource } from 'typeorm';
 import { KafkaEventPublisher } from './kafka-event-publisher';
+import { withEventTraceContext } from '../observability/trace-context.util';
 
 interface PendingOutboxRow {
   id: string;
@@ -53,7 +54,13 @@ export class OutboxPublisherWorker {
       for (const row of pending) {
         try {
           const topic = this.resolveTopic(row.event_type, defaultTopic);
-          await this.producer.sendRaw(topic, row.aggregate_id, row.payload);
+          const envelope = JSON.parse(row.payload) as {
+            correlationId?: string;
+            causationId?: string;
+          };
+          await withEventTraceContext(envelope.correlationId, envelope.causationId, () =>
+            this.producer.sendRaw(topic, row.aggregate_id, row.payload),
+          );
           await queryRunner.manager.query(
             `UPDATE outbox_events SET status = 'PUBLISHED', published_at = now(), error = NULL WHERE id = $1`,
             [row.id],

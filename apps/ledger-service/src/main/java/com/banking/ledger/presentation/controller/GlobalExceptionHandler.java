@@ -13,6 +13,8 @@ import com.banking.ledger.domain.exception.JournalEntryNotFoundException;
 import com.banking.ledger.domain.exception.TransactionAlreadyReversedException;
 import com.banking.ledger.domain.exception.UnbalancedEntryException;
 import com.banking.ledger.domain.exception.UnsupportedCurrencyException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
@@ -28,6 +30,8 @@ import java.util.stream.Collectors;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+    private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
     @ExceptionHandler(AccountNotFoundException.class)
     public ResponseEntity<Map<String, Object>> handleNotFound(AccountNotFoundException ex) {
@@ -86,6 +90,7 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<Map<String, Object>> handleGeneric(Exception ex) {
+        log.error("Unhandled exception", ex);
         return error(HttpStatus.INTERNAL_SERVER_ERROR, "INTERNAL_ERROR", "Unexpected error");
     }
 

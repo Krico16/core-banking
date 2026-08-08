@@ -9,6 +9,7 @@ import { TypeOrmTransactionRunner } from './persistence/transaction-runner.impl'
 import { KafkaEventPublisher } from './messaging/kafka-event-publisher';
 import { OutboxPublisherWorker } from './messaging/outbox-publisher.worker';
 import { LedgerHttpClient } from './http/ledger-http.client';
+import { PaymentStatusMetrics } from './metrics/payment-status.metrics';
 import {
   PAYMENT_REPOSITORY,
   LEDGER_CLIENT,
@@ -23,6 +24,7 @@ import {
   providers: [
     KafkaEventPublisher,
     OutboxPublisherWorker,
+    PaymentStatusMetrics,
     {
       provide: PAYMENT_REPOSITORY,
       useClass: PaymentRepositoryImpl,

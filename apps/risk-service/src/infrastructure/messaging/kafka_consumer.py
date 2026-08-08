@@ -3,11 +3,27 @@ import threading
 from typing import Callable, Optional
 
 from confluent_kafka import Consumer
+from opentelemetry import trace
+from opentelemetry.propagate import extract
 
 logger = logging.getLogger(__name__)
+tracer = trace.get_tracer(__name__)
 
 CONSUMER_GROUP = "risk-service-payment"
 POLL_TIMEOUT_SECONDS = 1.0
+
+
+def _extract_trace_context(headers: Optional[list[tuple[str, bytes]]]) -> trace.Context:
+    """confluent-kafka has no auto-instrumentation to do this for us: attaching the
+    extracted `traceparent` (injected by the producing side's outbox worker, see
+    outbox_publisher_worker.py) as the active context before calling the handler is
+    what lets build_event_envelope() continue the same trace for any event this
+    handler produces in response."""
+    carrier = {}
+    for key, value in headers or []:
+        if key == "traceparent" and value:
+            carrier["traceparent"] = value.decode("ascii") if isinstance(value, (bytes, bytearray)) else value
+    return extract(carrier)
 
 
 class PaymentRiskRequestConsumer:
@@ -47,7 +63,9 @@ class PaymentRiskRequestConsumer:
             if msg.error():
                 logger.error("Kafka consumer error: %s", msg.error())
                 continue
-            try:
-                self._handler(msg.value())
-            except Exception:
-                logger.exception("Error processing PaymentRiskEvaluationRequested message")
+            extracted_ctx = _extract_trace_context(msg.headers())
+            with tracer.start_as_current_span("process PaymentRiskEvaluationRequested", context=extracted_ctx):
+                try:
+                    self._handler(msg.value())
+                except Exception:
+                    logger.exception("Error processing PaymentRiskEvaluationRequested message")

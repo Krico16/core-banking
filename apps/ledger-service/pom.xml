@@ -43,11 +43,24 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-actuator</artifactId>
         </dependency>
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-prometheus</artifactId>
+        </dependency>
 
         <!-- Kafka (Redpanda) -->
         <dependency>
             <groupId>org.springframework.kafka</groupId>
             <artifactId>spring-kafka</artifactId>
+        </dependency>
+
+        <!-- OpenTelemetry API — reads the active span (set by the javaagent, see
+             Dockerfile) to source correlationId/causationId; the agent bridges this
+             API to its own managed SDK instance at runtime, no separate SDK dep needed. -->
+        <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-api</artifactId>
+            <version>1.44.0</version>
         </dependency>
 
         <!-- PostgreSQL -->

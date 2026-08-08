@@ -5,6 +5,7 @@ from ulid import ULID
 
 from application.dto.payment_risk_evaluation_request import PaymentRiskEvaluationRequest
 from application.services.event_envelope import build_event_envelope
+from application.services.risk_metrics import risk_evaluations_total
 from domain.entities.outbox_event import OutboxEvent
 from domain.ports.outbox_event_repository import OutboxEventRepository
 from domain.ports.risk_evaluation_repository import RiskEvaluationRepository
@@ -33,6 +34,7 @@ class EvaluatePaymentRiskUseCase:
     def execute(self, request: PaymentRiskEvaluationRequest) -> RiskDecision:
         today = datetime.now(timezone.utc).date()
         decision = self._evaluate(request, today)
+        risk_evaluations_total.labels(outcome=decision.outcome.value).inc()
 
         self._evaluations.record_evaluation(
             payment_id=request.payment_id,

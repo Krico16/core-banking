@@ -1,3 +1,4 @@
+import { trace } from '@opentelemetry/api';
 import { ulid } from 'ulidx';
 import { Payment } from '../../domain/entities';
 
@@ -16,6 +17,15 @@ export interface EventEnvelope {
 const PRODUCER = 'payment-service';
 const EVENT_VERSION = 1;
 
+/** correlationId/causationId are sourced from the active OTel span (traceId/spanId)
+ * so the envelope itself carries real trace context across the outbox/Kafka boundary
+ * (see infrastructure/observability/trace-context.util.ts) — falls back to the
+ * payment id only if no span is active (should not happen once instrumented). */
+function activeTraceIds(): { traceId: string; spanId: string } | undefined {
+  const spanContext = trace.getActiveSpan()?.spanContext();
+  return spanContext ? { traceId: spanContext.traceId, spanId: spanContext.spanId } : undefined;
+}
+
 /** Builds the standard envelope for a payment domain event, matching the shape the
  * old KafkaEventPublisher.extractData() produced (kept identical across event types). */
 export function buildPaymentEventEnvelope(
@@ -23,14 +33,15 @@ export function buildPaymentEventEnvelope(
   payment: Payment,
   extra?: Record<string, unknown>,
 ): EventEnvelope {
+  const active = activeTraceIds();
   return {
     eventId: ulid(),
     eventType,
     eventVersion: EVENT_VERSION,
     occurredAt: new Date().toISOString(),
     producer: PRODUCER,
-    correlationId: payment.id,
-    causationId: payment.id,
+    correlationId: active?.traceId ?? payment.id,
+    causationId: active?.spanId ?? payment.id,
     subjectId: payment.id,
     data: {
       paymentId: payment.id,

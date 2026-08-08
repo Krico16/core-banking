@@ -9,6 +9,7 @@ from infrastructure.messaging.kafka_producer import KafkaProducerWrapper
 from infrastructure.messaging.outbox_publisher_worker import OutboxPublisherWorker
 from infrastructure.messaging.risk_request_handler import RiskRequestHandler
 from presentation.health import router as health_router
+from presentation.metrics import router as metrics_router
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 
@@ -31,3 +32,4 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(title="risk-service", lifespan=lifespan)
 app.include_router(health_router)
+app.include_router(metrics_router)

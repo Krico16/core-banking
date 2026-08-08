@@ -6,7 +6,8 @@
   "workspaces": [
     "apps/*",
     "contracts/*",
-    "libraries/*"
+    "libraries/*",
+    "tests/*"
   ],
   "scripts": {
     "up": "docker compose -f compose.yaml up -d --build",

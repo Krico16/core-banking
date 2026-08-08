@@ -24,4 +24,4 @@ USER risk
 
 EXPOSE 3006
 
-CMD ["sh", "-c", "alembic upgrade head && uvicorn main:app --host 0.0.0.0 --port 3006 --app-dir src"]
+CMD ["sh", "-c", "alembic upgrade head && opentelemetry-instrument uvicorn main:app --host 0.0.0.0 --port 3006 --app-dir src"]

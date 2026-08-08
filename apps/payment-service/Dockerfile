@@ -20,4 +20,4 @@ USER node
 
 EXPOSE 3005
 
-CMD ["node", "dist/main"]
+CMD ["node", "-r", "./dist/infrastructure/observability/tracing.js", "dist/main"]

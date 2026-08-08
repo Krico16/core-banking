@@ -1,4 +1,6 @@
+import json
 import logging
+import re
 import threading
 from typing import Optional
 
@@ -12,6 +14,28 @@ logger = logging.getLogger(__name__)
 MAX_RETRIES = 10
 BATCH_SIZE = 100
 POLL_INTERVAL_SECONDS = 1.0
+
+_TRACE_ID_RE = re.compile(r"^[0-9a-f]{32}$")
+_SPAN_ID_RE = re.compile(r"^[0-9a-f]{16}$")
+
+
+def _trace_headers(payload: str) -> Optional[list[tuple[str, bytes]]]:
+    """confluent-kafka has no auto-instrumentation, and this worker runs on a
+    disconnected polling thread, not the request/consumer context that caused the
+    event — so the envelope's correlationId/causationId (an OTel traceId/spanId
+    pair, see application/services/event_envelope.py) are turned into a W3C
+    `traceparent` header by hand so the consuming side can continue the trace."""
+    try:
+        envelope = json.loads(payload)
+    except (TypeError, ValueError):
+        return None
+    correlation_id = envelope.get("correlationId")
+    causation_id = envelope.get("causationId")
+    if not correlation_id or not causation_id:
+        return None
+    if not _TRACE_ID_RE.match(correlation_id) or not _SPAN_ID_RE.match(causation_id):
+        return None
+    return [("traceparent", f"00-{correlation_id}-{causation_id}-01".encode("ascii"))]
 
 _SELECT_PENDING_SQL = text(
     """
@@ -71,7 +95,13 @@ class OutboxPublisherWorker:
 
             for row in rows:
                 try:
-                    self._producer.send(self._topic, key=row["aggregate_id"], value=row["payload"])
+                    headers = _trace_headers(row["payload"])
+                    if headers:
+                        self._producer.send(
+                            self._topic, key=row["aggregate_id"], value=row["payload"], headers=headers
+                        )
+                    else:
+                        self._producer.send(self._topic, key=row["aggregate_id"], value=row["payload"])
                     session.execute(_MARK_PUBLISHED_SQL, {"id": row["id"]})
                 except Exception as exc:
                     retry_count = row["retry_count"] + 1

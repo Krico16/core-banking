@@ -40,3 +40,6 @@ data/
 volumes/
 package-lock.json
 opencode.json
+
+captured-events/
+backups/

@@ -6,7 +6,10 @@
   "required": ["entryId", "paymentId", "sourceAccountId", "targetAccountId", "amount", "currency", "entryType", "entries", "postedAt"],
   "properties": {
     "entryId": { "type": "string" },
-    "paymentId": { "type": "string" },
+    "paymentId": {
+      "type": ["string", "null"],
+      "description": "null para DEPOSIT/WITHDRAWAL, que no están asociados a un pago"
+    },
     "sourceAccountId": { "type": "string" },
     "targetAccountId": { "type": "string" },
     "amount": { "type": "integer", "description": "Monto en centavos" },

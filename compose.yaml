@@ -2,6 +2,11 @@ services:
   postgres:
     image: postgres:16.3-alpine
     container_name: banking-postgres
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
@@ -25,6 +30,11 @@ services:
   redpanda:
     image: docker.redpanda.com/redpandadata/redpanda:v24.1.1
     container_name: banking-redpanda
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
     command:
       - redpanda
       - start
@@ -63,6 +73,11 @@ services:
   redpanda-console:
     image: docker.redpanda.com/redpandadata/console:v2.6.0
     container_name: banking-redpanda-console
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 256M
     environment:
       CONFIG_FILEPATH: /tmp/console-config.yml
     volumes:
@@ -80,6 +95,11 @@ services:
   prometheus:
     image: prom/prometheus:v2.53.0
     container_name: banking-prometheus
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.path=/prometheus
@@ -104,6 +124,11 @@ services:
   loki:
     image: grafana/loki:2.9.2
     container_name: banking-loki
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
     command: -config.file=/etc/loki/local-config.yml
     volumes:
       - ./platform/observability/loki/loki-config.yml:/etc/loki/local-config.yml:ro
@@ -124,6 +149,11 @@ services:
   tempo:
     image: grafana/tempo:2.4.1
     container_name: banking-tempo
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
     command: -config.file=/etc/tempo.yml
     volumes:
       - ./platform/observability/tempo/tempo.yml:/etc/tempo.yml:ro
@@ -146,6 +176,11 @@ services:
   grafana:
     image: grafana/grafana:10.4.0
     container_name: banking-grafana
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
     environment:
       GF_SECURITY_ADMIN_USER: admin
       GF_SECURITY_ADMIN_PASSWORD: admin
@@ -174,6 +209,11 @@ services:
   otel-collector:
     image: otel/opentelemetry-collector-contrib:0.102.1
     container_name: banking-otel-collector
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
     command: ["--config=/etc/otel-collector-config.yml"]
     volumes:
       - ./platform/observability/otel-collector/otel-config.yml:/etc/otel-collector-config.yml:ro
@@ -192,6 +232,11 @@ services:
       context: .
       dockerfile: apps/auth-service/Dockerfile
     container_name: banking-auth-service
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 384M
     environment:
       PORT: 3001
       DATABASE_HOST: postgres
@@ -206,6 +251,12 @@ services:
       JWT_REFRESH_TOKEN_EXPIRATION: 7d
       JWT_ISSUER: banking-auth-service
       JWT_AUDIENCE: banking-platform
+      OTEL_SERVICE_NAME: auth-service
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+      OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+      OTEL_TRACES_EXPORTER: otlp
+      OTEL_METRICS_EXPORTER: none
+      OTEL_LOGS_EXPORTER: none
     ports:
       - "3001:3001"
     networks:
@@ -227,6 +278,11 @@ services:
       context: .
       dockerfile: apps/customer-service/Dockerfile
     container_name: banking-customer-service
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 384M
     environment:
       PORT: 3002
       DATABASE_HOST: postgres
@@ -238,8 +294,17 @@ services:
       REDPANDA_BROKERS: redpanda:9092
       REDPANDA_CLIENT_ID: customer-service
       REDPANDA_TOPIC_CUSTOMER_EVENTS: banking.customer.events
+      JWT_PUBLIC_KEY_PATH: /app/keys/public.pem
       JWT_ISSUER: banking-auth-service
       JWT_AUDIENCE: banking-platform
+      OTEL_SERVICE_NAME: customer-service
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+      OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+      OTEL_TRACES_EXPORTER: otlp
+      OTEL_METRICS_EXPORTER: none
+      OTEL_LOGS_EXPORTER: none
+    volumes:
+      - ./apps/auth-service/keys/public.pem:/app/keys/public.pem:ro
     ports:
       - "3002:3002"
     networks:
@@ -263,6 +328,11 @@ services:
       context: .
       dockerfile: apps/account-service/Dockerfile
     container_name: banking-account-service
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 384M
     environment:
       PORT: 3003
       DATABASE_HOST: postgres
@@ -275,6 +345,17 @@ services:
       REDPANDA_CLIENT_ID: account-service
       REDPANDA_TOPIC_ACCOUNT_EVENTS: banking.account.events
       REDPANDA_TOPIC_CUSTOMER_EVENTS: banking.customer.events
+      JWT_PUBLIC_KEY_PATH: /app/keys/public.pem
+      JWT_ISSUER: banking-auth-service
+      JWT_AUDIENCE: banking-platform
+      OTEL_SERVICE_NAME: account-service
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+      OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+      OTEL_TRACES_EXPORTER: otlp
+      OTEL_METRICS_EXPORTER: none
+      OTEL_LOGS_EXPORTER: none
+    volumes:
+      - ./apps/auth-service/keys/public.pem:/app/keys/public.pem:ro
     ports:
       - "3003:3003"
     networks:
@@ -298,12 +379,23 @@ services:
       context: ./apps/ledger-service
       dockerfile: Dockerfile
     container_name: banking-ledger-service
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 768M
     environment:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/ledger_db
       SPRING_DATASOURCE_USERNAME: postgres
       SPRING_DATASOURCE_PASSWORD: postgres
       SPRING_KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
       SERVER_PORT: 3004
+      OTEL_SERVICE_NAME: ledger-service
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+      OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+      OTEL_TRACES_EXPORTER: otlp
+      OTEL_METRICS_EXPORTER: none
+      OTEL_LOGS_EXPORTER: none
     ports:
       - "3004:3004"
     networks:
@@ -327,6 +419,11 @@ services:
       context: ./apps/payment-service
       dockerfile: Dockerfile
     container_name: banking-payment-service
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 384M
     environment:
       DATABASE_HOST: postgres
       DATABASE_PORT: 5432
@@ -340,6 +437,12 @@ services:
       LEDGER_SERVICE_URL: http://ledger-service:3004
       LEDGER_TIMEOUT_MS: 10000
       PORT: 3005
+      OTEL_SERVICE_NAME: payment-service
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+      OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+      OTEL_TRACES_EXPORTER: otlp
+      OTEL_METRICS_EXPORTER: none
+      OTEL_LOGS_EXPORTER: none
     ports:
       - "3005:3005"
     networks:
@@ -363,6 +466,11 @@ services:
       context: ./apps/risk-service
       dockerfile: Dockerfile
     container_name: banking-risk-service
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 384M
     environment:
       DATABASE_HOST: postgres
       DATABASE_PORT: 5432
@@ -375,6 +483,12 @@ services:
       MAX_TRANSACTION_AMOUNT_CENTS: 1000000
       MAX_DAILY_AMOUNT_CENTS: 5000000
       PORT: 3006
+      OTEL_SERVICE_NAME: risk-service
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+      OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+      OTEL_TRACES_EXPORTER: otlp
+      OTEL_METRICS_EXPORTER: none
+      OTEL_LOGS_EXPORTER: none
     ports:
       - "3006:3006"
     networks:
@@ -398,6 +512,11 @@ services:
       context: .
       dockerfile: apps/notification-service/Dockerfile
     container_name: banking-notification-service
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 256M
     environment:
       DATABASE_HOST: postgres
       DATABASE_PORT: 5432
@@ -411,6 +530,12 @@ services:
       REDPANDA_TOPIC_ACCOUNT_EVENTS: banking.account.events
       REDPANDA_TOPIC_CUSTOMER_EVENTS: banking.customer.events
       PORT: 3007
+      OTEL_SERVICE_NAME: notification-service
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+      OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+      OTEL_TRACES_EXPORTER: otlp
+      OTEL_METRICS_EXPORTER: none
+      OTEL_LOGS_EXPORTER: none
     ports:
       - "3007:3007"
     networks:
@@ -434,6 +559,11 @@ services:
       context: .
       dockerfile: apps/query-service/Dockerfile
     container_name: banking-query-service
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 384M
     environment:
       DATABASE_HOST: postgres
       DATABASE_PORT: 5432
@@ -448,6 +578,12 @@ services:
       REDPANDA_TOPIC_LEDGER_EVENTS: banking.ledger.events
       REDPANDA_TOPIC_PAYMENT_EVENTS: banking.payment.events
       PORT: 3008
+      OTEL_SERVICE_NAME: query-service
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+      OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+      OTEL_TRACES_EXPORTER: otlp
+      OTEL_METRICS_EXPORTER: none
+      OTEL_LOGS_EXPORTER: none
     ports:
       - "3008:3008"
     networks:
@@ -471,6 +607,11 @@ services:
       context: .
       dockerfile: apps/api-gateway/Dockerfile
     container_name: banking-api-gateway
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 384M
     environment:
       PORT: 3009
       JWT_PUBLIC_KEY_PATH: /app/keys/public.pem
@@ -485,6 +626,12 @@ services:
       PAYMENT_SERVICE_URL: http://payment-service:3005
       NOTIFICATION_SERVICE_URL: http://notification-service:3007
       QUERY_SERVICE_URL: http://query-service:3008
+      OTEL_SERVICE_NAME: api-gateway
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+      OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+      OTEL_TRACES_EXPORTER: otlp
+      OTEL_METRICS_EXPORTER: none
+      OTEL_LOGS_EXPORTER: none
     volumes:
       - ./apps/auth-service/keys/public.pem:/app/keys/public.pem:ro
     ports:

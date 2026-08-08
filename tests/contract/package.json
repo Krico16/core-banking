@@ -1,0 +1,33 @@
+{
+  "name": "@banking/contract-tests",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Valida eventos reales/sintéticos contra los JSON Schema de contracts/json-schema",
+  "scripts": {
+    "test": "jest --runInBand"
+  },
+  "dependencies": {
+    "ajv": "^8.17.1",
+    "ajv-formats": "^3.0.1"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.12",
+    "@types/node": "^20.14.10",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.2.3",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.5.3"
+  },
+  "jest": {
+    "moduleFileExtensions": ["js", "json", "ts"],
+    "rootDir": "src",
+    "testRegex": ".*\\.contract-spec\\.ts$",
+    "transform": {
+      "^.+\\.(t|j)s$": "ts-jest"
+    },
+    "testEnvironment": "node"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

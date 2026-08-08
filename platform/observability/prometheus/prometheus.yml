@@ -11,13 +11,28 @@ scrape_configs:
     static_configs:
       - targets: ['otel-collector:8889']
 
-  # Health targets para servicios de aplicación (se completan en fases siguientes)
-  # - job_name: 'auth-service'
-  #   static_configs:
-  #     - targets: ['auth-service:3001']
-  # - job_name: 'ledger-service'
-  #   static_configs:
-  #     - targets: ['ledger-service:8080']
+  # Métricas de negocio (fase 8) — solo donde el roadmap las pide explícitamente,
+  # no en los 9 servicios (YAGNI). Las trazas de los otros servicios van vía OTLP
+  # al otel-collector, no por scrape.
+  - job_name: 'ledger-service'
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ['ledger-service:3004']
+
+  - job_name: 'payment-service'
+    static_configs:
+      - targets: ['payment-service:3005']
+
+  - job_name: 'risk-service'
+    static_configs:
+      - targets: ['risk-service:3006']
+
+  # Redpanda expone métricas Prometheus nativas en su Admin API (incluye lag de
+  # consumer groups por topic) — sin código de aplicación adicional.
+  - job_name: 'redpanda'
+    metrics_path: /public_metrics
+    static_configs:
+      - targets: ['redpanda:9644']
 
 alerting:
   alertmanagers: []

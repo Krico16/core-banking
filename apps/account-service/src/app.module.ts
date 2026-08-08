@@ -7,6 +7,7 @@ import { LoggerModule } from 'nestjs-pino';
 import appConfig from './infrastructure/config/app.config';
 import databaseConfig from './infrastructure/config/database.config';
 import redpandaConfig from './infrastructure/config/redpanda.config';
+import jwtConfig from './infrastructure/config/jwt.config';
 import { loggerConfig } from './common/logger/logger.config';
 import { InfrastructureModule } from './infrastructure/infrastructure.module';
 import { PresentationModule } from './presentation/presentation.module';
@@ -15,7 +16,7 @@ import { PresentationModule } from './presentation/presentation.module';
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
-      load: [appConfig, databaseConfig, redpandaConfig],
+      load: [appConfig, databaseConfig, redpandaConfig, jwtConfig],
       envFilePath: ['.env', '.env.local'],
     }),
     LoggerModule.forRoot(loggerConfig),

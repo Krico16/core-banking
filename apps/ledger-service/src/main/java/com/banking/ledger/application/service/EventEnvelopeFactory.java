@@ -7,6 +7,8 @@ import com.banking.ledger.domain.vo.Money;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.f4b6a3.ulid.UlidCreator;
+import io.opentelemetry.api.trace.Span;
+import io.opentelemetry.api.trace.SpanContext;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
@@ -127,14 +129,18 @@ public class EventEnvelopeFactory {
             Map<String, Object> data
     ) {
         String eventId = UlidCreator.getUlid().toString();
+        SpanContext activeSpan = Span.current().getSpanContext();
+        String traceId = activeSpan.isValid() ? activeSpan.getTraceId() : null;
+        String spanId = activeSpan.isValid() ? activeSpan.getSpanId() : null;
+
         Map<String, Object> envelope = new LinkedHashMap<>();
         envelope.put("eventId", eventId);
         envelope.put("eventType", eventType);
         envelope.put("eventVersion", EVENT_VERSION);
         envelope.put("occurredAt", occurredAt.toString());
         envelope.put("producer", PRODUCER);
-        envelope.put("correlationId", correlationId != null ? correlationId : eventId);
-        envelope.put("causationId", causationId != null ? causationId : eventId);
+        envelope.put("correlationId", correlationId != null ? correlationId : (traceId != null ? traceId : eventId));
+        envelope.put("causationId", causationId != null ? causationId : (spanId != null ? spanId : eventId));
         envelope.put("subjectId", subjectId);
         envelope.put("data", data);
 

@@ -1,5 +1,6 @@
 package com.banking.ledger.domain.vo;
 
+import com.banking.ledger.domain.exception.CurrencyMismatchException;
 import com.banking.ledger.domain.exception.InvalidMoneyException;
 import org.junit.jupiter.api.Test;
 
@@ -26,7 +27,7 @@ class MoneyTest {
     void add_rejectsCurrencyMismatch() {
         Money eur = Money.of(new BigDecimal("10"), "EUR");
         Money usd = Money.of(new BigDecimal("10"), "USD");
-        assertThrows(InvalidMoneyException.class, () -> eur.add(usd));
+        assertThrows(CurrencyMismatchException.class, () -> eur.add(usd));
     }
 
     @Test

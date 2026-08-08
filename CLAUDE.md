@@ -112,10 +112,44 @@ real con risk-service nuevo, y fix de `synchronize: true` en payment-service.
 
 Sigue pendiente:
 
-- **Cobertura de tests real**: auth-service sin tests; el resto tiene tests unitarios
-  del código tocado en el pase de deuda técnica, pero sigue sin haber tests de
-  integración/contrato/E2E del flujo completo. `make test` y `make seed` son TODOs
-  sin implementar.
+- **Cobertura de tests real**: auth-service sigue sin tests unitarios propios (deuda
+  documentada, `make test-unit` lo corre con `--passWithNoTests` para no romper la
+  cadena). El resto de servicios tiene tests unitarios del código tocado en pases de
+  deuda técnica anteriores. **RESUELTO (2026-08-06, fase 9 etapa 2): `make test` ya
+  no es un TODO** — corre los 9 unitarios (`test-unit`: 7 `npm test` NestJS + `mvn
+  test` en ledger-service vía el Maven vendorizado + `pytest` en risk-service) y un
+  suite E2E nuevo (`test-e2e`, `tests/end-to-end/`) que reproduce el flujo crítico
+  completo (`requests/banking.http`) black-box contra api-gateway con el stack real
+  levantado, incluyendo reintentos por consistencia eventual (KYC→apertura de cuenta,
+  AccountOpened→ledger) y polling de la saga de pago hasta estado terminal — verificado
+  dos corridas seguidas, ambas verdes. De paso corrigió una aserción de test obsoleta
+  en `MoneyTest.add_rejectsCurrencyMismatch` (esperaba `InvalidMoneyException`, el
+  código ya lanza el más específico `CurrencyMismatchException`) que bloqueaba `mvn
+  test`. **RESUELTO (2026-08-06, fase 9 etapa 3): tests de contrato reales** —
+  `tests/contract/` (ajv, draft 2020-12) valida el envelope y el payload de cada
+  evento contra `contracts/json-schema/`, usando de preferencia los eventos reales
+  capturados por `test-e2e` (`tests/end-to-end/captured-events/latest.json`, 16
+  eventos/10 tipos de una corrida real) y 2 fixtures sintéticas para
+  `PaymentRejected`/`PaymentRejectedByRisk` (el flujo feliz nunca los dispara). De
+  paso encontró y corrigió un mismatch real: el schema de `LedgerTransactionPosted`
+  exigía `paymentId` como `string` no-nullable, pero ledger-service legítimamente
+  emite `paymentId: null` en depósitos/retiros (no están asociados a un pago) —
+  corregido a `["string", "null"]`. **Hueco documentado, no escondido**: de los 22
+  tipos de evento activos en `docs/events/catalog.md` (excluyendo `FundsHeld`/
+  `FundsReleased`, diferidos), solo 12 tienen JSON Schema — los 10 restantes
+  (`CustomerVerified`, `CustomerSuspended`, `CustomerContactUpdated`,
+  `AccountFrozen`, `AccountClosed`, `LedgerTransactionReversed`, `PaymentFailed`,
+  `PaymentReversalRequested`, `PaymentReversed`, `PaymentFlaggedForReview`)
+  aparecen como `test.todo` explícito en `events.contract-spec.ts`, no como
+  cobertura fingida. **RESUELTO (2026-08-06, fase 9 etapa 4): `make seed` real**
+  — `tests/end-to-end/src/seed.ts` (reutiliza los mismos helpers HTTP del E2E,
+  no es un test de Jest) corre una vez el flujo feliz completo con una identidad
+  de demo fija (`demo@banking.local`) y deja el stack con 1 cliente verificado,
+  2 cuentas EUR, un depósito de 1000.00 y una transferencia de 250.00 completada
+  — listo para explorar a mano en Swagger/Grafana/Redpanda Console. Idempotente:
+  si el cliente demo ya existe, no repite la creación de cuentas — reporta el
+  estado actual y termina (verificado con dos corridas seguidas: la primera
+  crea todo, la segunda detecta el estado existente y no hace nada más).
 - **`FundsHeld`/`FundsReleased` deliberadamente no implementados** — diseño de fase 0
   para un flujo hold/capture que el saga actual (ADR-006, posting directo) no usa. No es
   un gap a "arreglar", es una decisión documentada en `docs/architecture/ledger-service.md`.
@@ -134,22 +168,37 @@ Sigue pendiente:
   (firma/issuer/audience/exp), no aplica un mapeo ruta→scope todavía (no existe esa
   tabla en ningún otro lado del repo hoy — YAGNI). Sin mTLS/token interno de
   servicio-a-servicio (fase 9). Ver `docs/architecture/api-gateway.md`.
-- **`account-service` y `customer-service` tienen el mismo bug de seguridad
-  pre-existente** en su guard JWT propio (`account-service/src/presentation/
-  guards/jwt-auth.guard.ts`, `customer-service/src/common/guards/jwt-auth.guard.ts`):
-  si `jwt.publicKeyPath` no resuelve (hoy no resuelve en ninguno de los dos — ni
-  registra un `jwt.config.ts`), caen a `jwt.decode()` sin verificar firma —
-  aceptan cualquier token con forma de JWT si se les pega directo (bypaseando
-  api-gateway). Ahora que ambos están en `compose.yaml` con sus puertos mapeados
-  al host (3002/3003), esto es más fácil de explotar sin querer que cuando
-  corrían "a mano" — mismo riesgo de siempre, más visible. api-gateway (borde
-  real, con verificación RS256 correcta) no tiene este problema. Encontrado al
-  construir api-gateway; la lógica insegura sigue sin arreglar (fuera de alcance,
-  candidato a `security-reviewer` aparte), pero **sí se agregó `jsonwebtoken` a
-  las `dependencies` de ambos `package.json`** (2026-08-01) — sin eso ni siquiera
-  compilaba en Docker (`npm install` limpio no traía la dependencia de rebote como
-  pasaba en local con un `node_modules` viejo): era un bloqueador real de build,
-  no solo un gap de runtime.
+- **`ledger-service` y `payment-service` no verifican JWT en absoluto** — hallazgo
+  del repaso STRIDE de fase 9 (2026-08-06, `docs/threat-model/stride-transfer-flow.md`).
+  A diferencia del bug de arriba (JWT decodificado sin verificar firma),
+  `ledger-service` no tiene ni siquiera `spring-boot-starter-security` en el
+  classpath, y `payment-service` no tiene `@UseGuards` en ningún controller — cero
+  autenticación, no una verificación rota. `POST /deposit`, `/withdraw`,
+  `/transfer`, `/reverse` (ledger, puerto host 3004) y `POST /api/payments/transfer`
+  (payment, puerto host 3005) son alcanzables directo desde `localhost`, saltándose
+  api-gateway por completo. `query-service` y `notification-service` tienen el
+  mismo problema del lado de lectura (exponen datos de cualquier `customerId` sin
+  autorizar). Es el ítem más urgente de fase 9 — ver el threat model actualizado
+  para el detalle de los 6 hallazgos y el orden de mitigación recomendado.
+- ~~`account-service` y `customer-service` tienen el mismo bug de seguridad
+  pre-existente en su guard JWT propio~~ — **RESUELTO (2026-08-06, fase 9 etapa
+  1)**. Ambos servicios caían a `jwt.decode()` sin verificar firma cuando
+  `jwt.publicKeyPath` no resolvía (nunca resolvía — ninguno registraba un
+  `jwt.config.ts`), aceptando cualquier token con forma de JWT si se les pegaba
+  directo, bypaseando la verificación RS256 real de api-gateway. Con ambos
+  puertos mapeados al host (3002/3003) desde la containerización, esto pasó de
+  riesgo teórico a explotable en vivo (confirmado antes del fix: un JWT sin
+  firma devolvía 200/404 en vez de 401). Corregido agregando `jwt.config.ts` a
+  los dos servicios (mismo patrón que `api-gateway/src/infrastructure/config/
+  jwt.config.ts`) y reescribiendo ambos `jwt-auth.guard.ts` para fallar cerrado:
+  `configService.getOrThrow('jwt.publicKeyPath')` + `readFileSync` directo (sin
+  el `existsSync` que permitía degradar), igual que
+  `api-gateway/src/infrastructure/auth/rs256-token-verifier.ts` — si la clave no
+  resuelve, el servicio ya no arranca, no acepta tokens sin firma. `compose.yaml`
+  actualizado con `JWT_PUBLIC_KEY_PATH`/`JWT_ISSUER`/`JWT_AUDIENCE` y el mismo
+  bind mount de `public.pem` que ya usaba api-gateway. Verificado: el ataque
+  documentado ahora devuelve 401 en ambos servicios, y un JWT real emitido por
+  auth-service sigue autenticando correctamente.
 
 Detalle completo con archivos y líneas de referencia: `docs/KNOWLEDGE_BASE.md`.
 
@@ -218,11 +267,38 @@ tests unitarios (con mocks) pasan — recién con un flujo e2e real contra
 Postgres/Kafka se detectan bugs de wiring de módulos, migraciones no conectadas,
 y mismatches de contrato HTTP entre servicios.
 
-## Siguiente paso: fase 8 (observabilidad)
+## Fase 8 — Observabilidad OTel end-to-end (2026-08-02)
 
-Fase 7 está completa (los 8 servicios de negocio + api-gateway son código real).
-Ver `docs/ROADMAP.md` para el detalle de fase 8 (OpenTelemetry end-to-end) y lo que
-queda pendiente de fase 9 (tests E2E, mTLS, hardening).
+Los 9 servicios están instrumentados con OpenTelemetry: SDK Node (`@opentelemetry/
+sdk-node` + auto-instrumentations, cargado antes de `main.js` vía `node -r`) en los
+7 servicios NestJS, javaagent en ledger-service (Java), `opentelemetry-instrument`
+en risk-service (Python). `correlationId`/`causationId` del envelope ahora son el
+`traceId`/`spanId` del span activo, no un id de negocio — incluyendo sobre el
+patrón outbox, donde el publisher corre en un tick de polling desconectado del
+request original y por eso hubo que reconstruir el contexto remoto a mano antes de
+publicar a Kafka (`trace-context.util.ts` en customer/account/payment-service;
+construcción/extracción manual de `traceparent` en risk-service, que usa
+`confluent-kafka` sin auto-instrumentación disponible). **Verificado con una
+transferencia real de punta a punta**: una sola traza en Tempo cruza api-gateway →
+payment-service → risk-service → ledger-service → notification-service →
+query-service. Métricas de negocio nuevas: `banking_ledger_balance_imbalance`
+(Micrometer/Actuator, confirmado en 0.0), `banking_payments_by_status` (payment-
+service, `prom-client`), `banking_risk_evaluations_total` (risk-service,
+`prometheus_client`), lag de consumidores vía las métricas nativas de Redpanda
+(`redpanda_kafka_max_offset` - `redpanda_kafka_consumer_group_committed_offset`,
+sin código nuevo). Dashboard de Grafana provisionado por archivo
+(`platform/observability/grafana/provisioning/dashboards/banking-overview.json`).
+Detalle completo en `docs/ROADMAP.md` fase 8.
+
+De paso se corrigió un bug de logging pre-existente en ledger-service
+(`GlobalExceptionHandler`'s handler genérico de `Exception` no logueaba nada antes
+de devolver el 500 — cualquier error interno era invisible incluso mirando los
+logs, encontrado al depurar durante esta verificación).
+
+## Siguiente paso: fase 9 (hardening)
+
+Ver `docs/ROADMAP.md` para el detalle de lo que queda pendiente (tests E2E
+automatizados, mTLS, STRIDE revisitado, escaneo de imágenes, backups).
 
 ## Convenciones
 

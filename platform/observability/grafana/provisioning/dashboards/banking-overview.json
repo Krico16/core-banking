@@ -1,0 +1,93 @@
+{
+  "id": null,
+  "uid": "banking-overview",
+  "title": "Banking — Observabilidad de negocio",
+  "tags": ["banking"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "10s",
+  "time": { "from": "now-30m", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Saldo contable (Σ débitos - Σ créditos) — debe ser 0",
+      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 0 },
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "banking_ledger_balance_imbalance",
+          "legendFormat": "imbalance"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyEUR",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 0.01 },
+              { "color": "red", "value": -0.01 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Pagos por estado",
+      "gridPos": { "h": 6, "w": 9, "x": 6, "y": 0 },
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "banking_payments_by_status",
+          "legendFormat": "{{status}}"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Evaluaciones de riesgo por resultado (tasa/5m)",
+      "gridPos": { "h": 6, "w": 9, "x": 15, "y": 0 },
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "sum by (outcome) (rate(banking_risk_evaluations_total[5m]))",
+          "legendFormat": "{{outcome}}"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Lag de consumidores por topic (Redpanda)",
+      "gridPos": { "h": 6, "w": 12, "x": 0, "y": 6 },
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "redpanda_kafka_max_offset{redpanda_namespace=\"kafka\"} - on(redpanda_topic, redpanda_partition) group_right(redpanda_group) redpanda_kafka_consumer_group_committed_offset",
+          "legendFormat": "{{redpanda_topic}} ({{redpanda_group}})"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "traces",
+      "title": "Trazas de payment-service (flujo de transferencia)",
+      "gridPos": { "h": 12, "w": 12, "x": 12, "y": 6 },
+      "datasource": "Tempo",
+      "targets": [
+        {
+          "queryType": "search",
+          "serviceName": "payment-service",
+          "limit": 20
+        }
+      ]
+    }
+  ]
+}

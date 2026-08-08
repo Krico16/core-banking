@@ -1,4 +1,4 @@
-.PHONY: up down stop status health test test-app migrate seed lint build logs ps clean
+.PHONY: up down stop status health test test-unit test-e2e test-contract test-app migrate seed lint build logs ps clean
 
 COMPOSE_FILE := compose.yaml
 
@@ -17,9 +17,36 @@ status:
 health:
 	docker compose -f $(COMPOSE_FILE) ps --format json
 
-test:
-	@echo "Running all tests..."
-	# TODO: implement per-service test runner
+test: test-unit test-e2e test-contract
+
+# Unitarios de los 9 servicios. auth-service no tiene tests todavía (deuda
+# técnica documentada en CLAUDE.md) — --passWithNoTests evita que rompa la
+# cadena mientras eso sigue pendiente, no lo esconde.
+test-unit:
+	@echo "== Unitarios NestJS (7 servicios) =="
+	cd apps/auth-service && npm test -- --passWithNoTests
+	cd apps/customer-service && npm test
+	cd apps/account-service && npm test
+	cd apps/payment-service && npm test
+	cd apps/notification-service && npm test
+	cd apps/query-service && npm test
+	cd apps/api-gateway && npm test
+	@echo "== Unitarios ledger-service (Maven vendorizado) =="
+	cd apps/ledger-service && ../../tools/maven/apache-maven-3.9.6/bin/mvn test
+	@echo "== Unitarios risk-service (pytest, venv propio) =="
+	cd apps/risk-service && .venv/Scripts/pytest.exe
+
+# Requiere el stack levantado (make up) — flujo completo vía api-gateway.
+test-e2e:
+	@echo "== E2E: flujo crítico completo contra el stack real =="
+	cd tests/end-to-end && npm test
+
+# Valida eventos contra contracts/json-schema/. Usa los eventos reales
+# capturados por test-e2e si esa corrida ya dejó captured-events/latest.json
+# (si no, valida solo las fixtures sintéticas — no requiere el stack).
+test-contract:
+	@echo "== Contrato: eventos vs. contracts/json-schema/ =="
+	cd tests/contract && npm test
 
 test-app:
 	cd apps/$(name) && npm test
@@ -28,8 +55,8 @@ migrate:
 	cd apps/$(name) && npm run migration:run
 
 seed:
-	@echo "Loading seed data..."
-	# TODO: implement seed script
+	@echo "== Datos de demo (requiere 'make up' con el stack ya levantado) =="
+	cd tests/end-to-end && npm run seed
 
 lint:
 	@echo "Linting all services..."

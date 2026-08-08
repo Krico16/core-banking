@@ -121,47 +121,104 @@ verificable" (cómo saber que está realmente hecha, no solo que existe código)
 
 ---
 
-## Fase 8 — Observabilidad de negocio (OpenTelemetry end-to-end)
+## Fase 8 — Observabilidad de negocio (OpenTelemetry end-to-end) — HECHO (2026-08-02)
 
-Prerrequisito de infraestructura ya existe (Prometheus/Grafana/Loki/Tempo/OTel Collector
-desplegados desde fase 1), pero **ningún servicio está instrumentado todavía**.
+Prerrequisito de infraestructura ya existía (Prometheus/Grafana/Loki/Tempo/OTel Collector
+desplegados desde fase 1); ningún servicio estaba instrumentado — ahora los 9 lo están.
 
-- [ ] Instrumentar cada servicio (TS: `@opentelemetry/sdk-node` + auto-instrumentations;
-  Java: agente OTel; Python: `opentelemetry-instrumentation-fastapi`).
-- [ ] Propagar `correlationId`/`causationId` del envelope de eventos como trace context,
-  no solo como campo de datos — así una traza cruza HTTP + Kafka + servicios.
-- [ ] Métricas de negocio: saldo contable total = 0 (invariante de partida doble),
-  lag de consumidores por topic, tasa de rechazo de risk-service, pagos por estado.
-- [ ] Dashboard Grafana con esas métricas + trazas de un flujo de transferencia completo.
-- **Resultado verificable**: una transferencia de prueba es visible como una traza única
-  en Tempo que atraviesa payment → risk → ledger → notification, y el dashboard muestra
-  saldo contable = 0 en todo momento.
+- [x] Instrumentado cada servicio: TS (`@opentelemetry/sdk-node` + auto-instrumentations-node,
+  cargado vía `node -r dist/infrastructure/observability/tracing.js` antes de `main.js` en
+  los 7 servicios NestJS), Java (`opentelemetry-javaagent` 2.30.0 descargado en el
+  Dockerfile de ledger-service, `-javaagent:/app/otel-javaagent.jar`), Python
+  (`opentelemetry-instrument` antepuesto al `uvicorn` de risk-service).
+- [x] `correlationId`/`causationId` del envelope ahora se derivan del `traceId`/`spanId`
+  del span activo (no de un id de negocio hardcodeado) en los 4 lenguajes/helpers:
+  `event-envelope.util.ts` (account/customer/payment), `EventEnvelopeFactory.java`
+  (ledger), `event_envelope.py` (risk). Sobre Kafka, el patrón outbox rompía la
+  continuidad de la traza (el publisher corre en un tick de polling desconectado del
+  request original) — se resolvió reconstruyendo el contexto remoto a partir de esos
+  mismos campos justo antes de publicar (`trace-context.util.ts` en los 3 servicios
+  NestJS con outbox; construcción/extracción manual de `traceparent` en
+  `outbox_publisher_worker.py`/`kafka_consumer.py` de risk-service, ya que
+  `confluent-kafka` no tiene auto-instrumentación). Verificado en Tempo: una
+  transferencia real produce **una sola traza** que atraviesa api-gateway →
+  payment-service → risk-service → ledger-service → notification-service →
+  query-service.
+- [x] Métricas de negocio: `banking_ledger_balance_imbalance` (Micrometer +
+  `micrometer-registry-prometheus`, Σ débitos - Σ créditos vía nuevo método de
+  repositorio, debe ser 0 — verificado en 0.0 tras una transferencia real),
+  `banking_payments_by_status` (payment-service, `prom-client`, `/metrics`),
+  `banking_risk_evaluations_total{outcome}` (risk-service, `prometheus_client`,
+  `/metrics`), lag de consumidores por topic (sin código nuevo — Redpanda expone
+  `redpanda_kafka_max_offset`/`redpanda_kafka_consumer_group_committed_offset`
+  nativamente en `/public_metrics`, restado en la query de Grafana).
+- [x] Dashboard Grafana (`platform/observability/grafana/provisioning/dashboards/
+  banking-overview.json`, provisionado por archivo) con 5 paneles: saldo contable,
+  pagos por estado, evaluaciones de riesgo por resultado, lag de consumidores, y
+  búsqueda de trazas de payment-service contra el datasource Tempo.
+- **Resultado verificable — confirmado con una transferencia real de punta a punta**:
+  traza única en Tempo cruzando los 6 servicios del flujo, `banking_ledger_balance_imbalance`
+  en 0.0, y los scrape targets de Prometheus (`ledger-service`, `payment-service`,
+  `risk-service`, `redpanda`) en estado `up`.
+
+De regalo, se encontró y corrigió un bug pre-existente no relacionado con observabilidad
+pero descubierto durante esta verificación: `GlobalExceptionHandler` de ledger-service
+(handler genérico de `Exception`) no logueaba la excepción antes de devolver el 500
+genérico — cualquier error interno era invisible incluso mirando los logs. Se agregó
+`log.error("Unhandled exception", ex)`.
 
 ## Fase 9 — Hardening
 
 Incluye STRIDE, rate limiting, escaneo de imágenes, cifrado en reposo, backups —
 y absorbe la deuda técnica no resuelta antes (si no se hizo en 7.4/7.5):
 
-- [ ] Revisitar `docs/threat-model/stride-transfer-flow.md` contra el código real
-  (fue escrito en fase 0, antes de que existiera payment/risk).
+- [x] **Revisitar `docs/threat-model/stride-transfer-flow.md` contra el código
+  real — HECHO (2026-08-06)**. Verificado línea por línea (controllers, guards,
+  `compose.yaml`), no solo contra el diseño de `docs/architecture/`. Encontró 6
+  hallazgos críticos no documentados antes: `ledger-service` y `payment-service`
+  no tienen NINGÚN guard de autenticación HTTP (endpoints de posting/transfer
+  alcanzables sin JWT en los puertos mapeados al host 3004/3005),
+  `query-service`/`notification-service` exponen datos de cualquier cliente sin
+  auth, solo 2/9 servicios verifican JWT propio, y el sistema de roles/scopes que
+  el documento original asumía (`ledger:post`, `account:read:self`) nunca se
+  construyó — igual que el `audit-service` mencionado (viene de
+  `Propuesta-2.md`/`Propuesta-4.md`, documentos de diseño previos al MVP real,
+  no del código). Ver el documento actualizado para el detalle completo y el
+  orden de mitigación recomendado — el punto 1 de esa lista (guard de auth en
+  ledger/payment-service) es ahora el ítem más urgente de fase 9.
 - [x] ~~Corregir `payment-service`: quitar `synchronize: true`~~ — HECHO (ver
   `docs/KNOWLEDGE_BASE.md` §3.4). Adelantado desde fase 9 durante el pase de deuda técnica.
-- [ ] Tests de integración/E2E reales: poblar `tests/end-to-end/` con al menos el
-  flujo completo auth → customer → account → payment → ledger → risk. Poblar
-  `tests/contract/` validando eventos contra los JSON Schema de `contracts/`.
-  **Nota (2026-08-01)**: ya se corrió manualmente el flujo completo a través de
-  api-gateway (script puntual, no comiteado al repo) y encontró/corrigió 6 bugs
-  reales de wiring/migraciones/contrato HTTP — ver `CLAUDE.md` sección
-  "Verificación e2e real". Sigue pendiente automatizarlo como test repetible.
-- [ ] Implementar `make test` y `make seed` de verdad (hoy son TODOs vacíos) —
-  requiere antes un runner agregado de monorepo (workspaces + script raíz).
-- [ ] mTLS o token interno de servicio-a-servicio (hoy sin autenticación entre servicios).
-- [ ] Rate limiting real en api-gateway (si no se hizo en 7.5).
+- [x] **Tests de integración/E2E reales — HECHO (2026-08-06)**. `tests/end-to-end/`
+  (`critical-flow.e2e-spec.ts`) reproduce el flujo crítico completo auth → customer
+  → account → payment → ledger → risk contra el stack real vía api-gateway, con
+  reintentos por consistencia eventual y polling de la saga hasta estado terminal.
+  `tests/contract/` (ajv, draft 2020-12) valida eventos reales capturados
+  (`captured-events/latest.json`) contra `contracts/json-schema/` — 12/22 tipos de
+  evento con schema, los 10 restantes como `test.todo` explícito, no cobertura
+  fingida. Ver `CLAUDE.md` para el detalle completo (bugs encontrados, mismatches
+  de contrato corregidos). `tests/resilience/` sigue vacío — diferido, sin fecha.
+- [x] **`make test` y `make seed` reales — HECHO (2026-08-06)**. `make test` corre
+  los 9 unitarios (`test-unit`) + el suite E2E (`test-e2e`) + contract
+  (`test-contract`). `make seed` (`tests/end-to-end/src/seed.ts`) deja el stack con
+  datos de demo idempotentes (cliente verificado, 2 cuentas, depósito, transferencia).
+- [ ] **mTLS o token interno de servicio-a-servicio** — sigue pendiente, y el
+  repaso de STRIDE (arriba) confirmó que esto no es un endurecimiento incremental:
+  es la única barrera ausente entre cualquier proceso en la máquina host y postear
+  asientos contables directamente. Antes de esto (o junto con), agregar guard de
+  auth propio en `ledger-service`/`payment-service`/`query-service`/
+  `notification-service` — hoy 5 de 9 servicios no verifican JWT en absoluto.
+- [ ] Rate limiting real en api-gateway — HECHO lo básico en 7.5 (por IP,
+  `express-rate-limit`), pero el repaso de STRIDE confirmó que se puede saltar
+  pegándole directo a los servicios internos vía sus puertos mapeados al host
+  (mismo gap que mTLS arriba).
 - [ ] Escaneo de imágenes (Trivy o similar), cifrado en reposo de Postgres, backups
   con prueba de restauración real (no solo `pg_dump` sin verificar).
 - **Resultado verificable**: pruebas de abuso definidas en el threat model no
   comprometen el sistema, y una restauración de backup completa se ejecuta y se
-  verifica contra datos conocidos.
+  verifica contra datos conocidos. **Actualización 2026-08-06**: las pruebas de
+  abuso ya identificaron 4 hallazgos CRITICAL explotables hoy (ver STRIDE arriba)
+  — el "resultado verificable" de esta fase todavía no se cumple, ese es
+  precisamente el trabajo que queda.
 
 ## Fase 10 — Kubernetes local (K3s) + CI/CD
 
@@ -185,12 +242,13 @@ y absorbe la deuda técnica no resuelta antes (si no se hizo en 7.4/7.5):
 7.2 notification-service ────────────────┤ HECHO
 7.3 query-service ────────────────────────┤ HECHO
 7.5 api-gateway ──────────────────────────┘ HECHO — FASE 7 COMPLETA
-→ 8 observabilidad OTel end-to-end
+8 observabilidad OTel end-to-end ─────────── HECHO — traza única verificada en Tempo
 → 9 hardening (resto: tests E2E, mTLS, STRIDE revisitado, escaneo de imágenes, backups)
 → 10 K3s + CI/CD
 ```
 
-Fase 7 está completa: los 8 servicios de negocio (auth, customer, account, ledger,
-payment, risk, notification, query) más el borde único (api-gateway) son código
-real. El siguiente paso natural es fase 8 (observabilidad OTel end-to-end) — ver
-`AGENTS.md` para el detalle completo de esa fase.
+Fases 7 y 8 están completas: los 8 servicios de negocio + api-gateway son código
+real, y los 9 servicios están instrumentados con OpenTelemetry (trazas cruzando
+Kafka vía el patrón outbox, métricas de negocio, dashboard de Grafana). El
+siguiente paso natural es fase 9 (hardening) — ver `AGENTS.md` para el detalle
+completo de esa fase.

@@ -1,17 +1,15 @@
 import { Injectable, CanActivate, ExecutionContext, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { readFileSync, existsSync } from 'fs';
+import { readFileSync } from 'fs';
 import * as jwt from 'jsonwebtoken';
 
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
-  private publicKey: string | null = null;
+  private readonly publicKey: string;
 
   constructor(private readonly configService: ConfigService) {
-    const path = configService.get<string>('jwt.publicKeyPath');
-    if (path && existsSync(path)) {
-      this.publicKey = readFileSync(path, 'utf8');
-    }
+    const path = configService.getOrThrow<string>('jwt.publicKeyPath');
+    this.publicKey = readFileSync(path, 'utf8');
   }
 
   canActivate(context: ExecutionContext): boolean {
@@ -23,18 +21,6 @@ export class JwtAuthGuard implements CanActivate {
     }
 
     const token = authHeader.split(' ')[1];
-
-    if (!this.publicKey) {
-      const decoded = jwt.decode(token) as Record<string, unknown> | null;
-      if (!decoded) throw new UnauthorizedException('Invalid token');
-      request.user = {
-        userId: decoded.sub as string,
-        email: decoded.email as string,
-        roles: (decoded.roles as string[]) || [],
-        scopes: (decoded.scopes as string[]) || [],
-      };
-      return true;
-    }
 
     try {
       const issuer = this.configService.get<string>('jwt.issuer') || 'banking-auth-service';
