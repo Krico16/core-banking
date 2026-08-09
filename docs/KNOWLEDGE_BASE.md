@@ -11,7 +11,13 @@ crítico (account-service consume CustomerRegistered/CustomerVerified, ledger-se
 consume AccountOpened y emite AccountBalanceChanged/LedgerTransactionRejected, saga de
 riesgo real con risk-service nuevo), y fix del bug de `synchronize: true`. Cada
 subsección abajo indica explícitamente qué quedó resuelto y qué sigue igual (§3.3,
-tests, sigue pendiente — fuera de alcance de ese pase).
+tests, se resolvió parcialmente después, en fase 9 — ver actualización 2026-08-06
+más abajo).
+
+**Actualización 2026-08-06 (fase 9, etapas 1-4 de hardening)**: se cerró el bypass
+de JWT en account/customer-service (§6), se construyeron `tests/end-to-end/` y
+`tests/contract/` (§3.3), y `make seed` dejó de ser un TODO. Detalle completo,
+etapa por etapa, en `CLAUDE.md`.
 
 **Actualización 2026-08-01**: se containerizaron auth/customer/account (ya no corren
 "a mano") y se corrió el flujo e2e completo por primera vez a través de api-gateway.
@@ -52,7 +58,8 @@ código real. Fase 8 (observabilidad OTel end-to-end) es el siguiente paso.
 | web-app | ❌ vacío | React (planeado) | Carpeta existe, 0 archivos |
 
 También vacíos: `libraries/{ts-event-envelope,java-observability,py-event-envelope}/`,
-`tests/{contract,end-to-end,resilience}/`, `contracts/openapi/`.
+`tests/resilience/`, `contracts/openapi/`. (`tests/contract/` y `tests/end-to-end/`
+ya no están vacíos — ver §3.3, actualizada 2026-08-06.)
 
 Cada servicio con código real sigue la estructura hexagonal obligatoria
 (`domain/ → application/ → infrastructure/ → presentation/`) definida en ADR-007 —
@@ -123,13 +130,22 @@ Detalle completo de la implementación: `docs/architecture/payment-service.md` y
 | ledger-service | 5 tests JUnit, todos de `domain/` (Money, Currency, JournalEntry, LedgerAccount, BankCashAccountResolver) |
 | payment-service | `test/payment-state-machine.spec.ts`, `test/saga-orchestrator.spec.ts` (2 archivos) |
 
-`tests/contract/`, `tests/end-to-end/`, `tests/resilience/` vacíos: **cero tests de
-integración, contrato o E2E**. `make test` es un `echo` con TODO, igual que `make seed`.
-El `npm test`/`npm run lint` de la raíz solo entran a `apps/auth-service` (ver `package.json`
-y `Makefile` raíz) — no hay runner agregado de monorepo.
+**RESUELTO (2026-08-06, fase 9 etapas 2-3)**: `tests/end-to-end/critical-flow.e2e-spec.ts`
+corre 8 tests contra el stack real vía api-gateway (register → login → customer → KYC →
+2 cuentas → depósito → transferencia con polling de saga → proyecciones de query-service →
+notificación), y `tests/contract/` valida eventos reales capturados por ese mismo E2E (más
+2 fixtures sintéticas) contra los JSON Schema de `contracts/json-schema/`. `make test` ya
+agrega de verdad `test-unit` (los 9 servicios) + `test-e2e` + `test-contract` (target real
+en el `Makefile` raíz), y `make seed` deja el stack con datos de demo reproducibles
+(verificado idempotente en dos corridas seguidas). **Sigue pendiente**: `tests/resilience/`
+vacío, `auth-service` sin tests unitarios propios, y solo 12 de los ~22 tipos de evento del
+catálogo tienen JSON Schema (el resto queda como `test.todo` explícito en
+`tests/contract/src/events.contract-spec.ts`, no como cobertura fingida). Detalle completo
+en `CLAUDE.md`.
 
-El flujo completo de transferencia (auth → customer → account → payment → ledger) nunca
-se ha probado automatizado de punta a punta.
+El flujo completo de transferencia (auth → customer → account → payment → ledger) ya se
+prueba automatizado de punta a punta — ver `tests/end-to-end/critical-flow.e2e-spec.ts`
+arriba.
 
 ### 3.4 Deuda de persistencia — payment-service — RESUELTO (2026-07-31)
 
@@ -179,9 +195,9 @@ faltante de `processed_events` (antes solo existía vía `synchronize`) y script
 - Antes de afirmar "el evento X se publica" o "el servicio Y está probado", verificar en
   código — la documentación de arquitectura describe el diseño de fase 0, no siempre el
   estado real (aunque §3.1/§3.2/§3.4 ya están al día tras el pase de 2026-07-31).
-- **§3.3 (cobertura de tests) sigue pendiente** — no se tocó en este pase. Cada pieza
-  nueva (outbox, consumidores, risk-service) sí lleva sus propios tests unitarios, pero
-  no hay tests de integración/E2E del flujo completo todavía.
+- **§3.3 (cobertura de tests) — parcialmente resuelto (2026-08-06, fase 9 etapas 2-3)**:
+  ya hay E2E y contrato reales (ver arriba). Sigue pendiente `tests/resilience/` y
+  tests unitarios propios de `auth-service`.
 - Al escribir servicios nuevos, seguir el patrón de outbox ya establecido en los
   servicios existentes (incluido risk-service en Python) en vez de reinventar uno
   nuevo — salvo que el servicio sea un consumidor terminal (notification-service,
@@ -189,14 +205,18 @@ faltante de `processed_events` (antes solo existía vía `synchronize`) y script
   outbox propio.
 - **Bug de seguridad pre-existente encontrado al construir api-gateway** (y
   replicado en customer-service): `jwt-auth.guard.ts` en account-service y en
-  customer-service caen a `jwt.decode()` sin verificar firma cuando
-  `jwt.publicKeyPath` no resuelve — y no resuelve en ninguno de los dos, ya que
-  ninguno registra `jwt.config.ts`. La lógica insegura sigue sin arreglar (fuera
-  de alcance, candidato a `security-reviewer` aparte), pero al containerizar
-  ambos servicios (2026-08-01) se descubrió que **tampoco declaraban
-  `jsonwebtoken` en su `package.json`** — un `npm install` limpio (como el que
-  hace un build de Docker, a diferencia de un `node_modules` local ya poblado)
-  fallaba en tiempo de compilación, no solo en runtime. Se agregó la dependencia
-  a ambos para desbloquear el build; el fallback inseguro en sí no se tocó.
+  customer-service caían a `jwt.decode()` sin verificar firma cuando
+  `jwt.publicKeyPath` no resolvía — y no resolvía en ninguno de los dos, ya que
+  ninguno registraba `jwt.config.ts`. Al containerizar ambos servicios
+  (2026-08-01) se descubrió además que **tampoco declaraban `jsonwebtoken` en
+  su `package.json`** — un `npm install` limpio (como el que hace un build de
+  Docker, a diferencia de un `node_modules` local ya poblado) fallaba en tiempo
+  de compilación, no solo en runtime. Se agregó la dependencia a ambos para
+  desbloquear el build. **RESUELTO (2026-08-06, fase 9 etapa 1)**: se agregó
+  `jwt.config.ts` a los dos servicios y se reescribieron ambos `jwt-auth.guard.ts`
+  para fallar cerrado (`configService.getOrThrow('jwt.publicKeyPath')` +
+  `readFileSync` directo, sin fallback inseguro) — verificado con el ataque
+  documentado (JWT sin firma directo a `localhost:3002`/`3003`) devolviendo 401.
+  Detalle completo en `CLAUDE.md`.
 - Ver `docs/ROADMAP.md` para la secuencia tras fase 7 (completa): observabilidad
   OTel (fase 8), hardening (fase 9).

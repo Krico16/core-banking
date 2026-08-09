@@ -156,14 +156,17 @@ npm test
 - [ ] Scopes por ruta (autorización fina) — diferido: no existe hoy una tabla de
   mapeo ruta→scope en el repo; inventar una ahora sería especulativo (YAGNI)
 - [ ] mTLS / token interno de servicio-a-servicio (fase 9)
-- [ ] Tests de integración/E2E contra servicios reales — verificación manual
-  (`docker compose up` + `curl` de humo) documentada arriba, no automatizada
+- [x] Tests de integración/E2E contra servicios reales — automatizados desde
+  2026-08-06 (fase 9, etapa 2): `tests/end-to-end/critical-flow.e2e-spec.ts`,
+  vía api-gateway contra el stack real
 
-## Nota fuera de alcance
+## Nota fuera de alcance (resuelta 2026-08-06, fase 9 etapa 1)
 
-`account-service` y `customer-service` tienen el mismo fallback inseguro en su
-guard JWT propio (cae a `jwt.decode()` sin verificar firma si la clave pública no
-resuelve, que es el caso hoy en ambos — ninguno registra `jwt.config.ts`). No es
-parte de este servicio; queda como deuda a revisar aparte (candidato a
-`security-reviewer`). El gateway no depende de esos guards ni los reemplaza —
-solo garantiza que nadie sin JWT válido llegue a esos servicios *a través de él*.
+`account-service` y `customer-service` tenían el mismo fallback inseguro en su
+guard JWT propio (caían a `jwt.decode()` sin verificar firma cuando la clave
+pública no resolvía — el caso real en ambos, ya que ninguno registraba
+`jwt.config.ts`). No era parte de este servicio, pero sí explotable directo
+contra sus puertos mapeados al host, saltándose el gateway. Corregido en fase 9
+etapa 1 (`jwt.config.ts` + guard fail-closed en ambos, ver `CLAUDE.md`) — el
+gateway sigue sin depender de esos guards ni reemplazarlos, solo garantiza que
+nadie sin JWT válido llegue a esos servicios *a través de él*.

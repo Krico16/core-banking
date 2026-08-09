@@ -243,7 +243,7 @@ y absorbe la deuda técnica no resuelta antes (si no se hizo en 7.4/7.5):
 7.3 query-service ────────────────────────┤ HECHO
 7.5 api-gateway ──────────────────────────┘ HECHO — FASE 7 COMPLETA
 8 observabilidad OTel end-to-end ─────────── HECHO — traza única verificada en Tempo
-→ 9 hardening (resto: tests E2E, mTLS, STRIDE revisitado, escaneo de imágenes, backups)
+→ 9 hardening (resto: token interno servicio-a-servicio, rate limiting diferenciado, escaneo de imágenes, backups)
 → 10 K3s + CI/CD
 ```
 

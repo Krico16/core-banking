@@ -57,6 +57,16 @@ docker compose -f compose.yaml up -d ledger-service
 curl http://localhost:3004/api/health
 ```
 
+### Tests y datos de demo
+
+```bash
+make test   # 9 suites unitarias + E2E (tests/end-to-end/) + contrato (tests/contract/)
+make seed   # deja el stack con un cliente demo, 2 cuentas EUR y una transferencia completada
+```
+
+`make test`/`make seed` requieren el stack levantado (`make up`). Ver
+`AGENTS.md` para el detalle de cada target.
+
 ### Desarrollo local con hot-reload (opcional)
 
 Para iterar rápido en un servicio puntual sin rebuild de imagen, se puede correr

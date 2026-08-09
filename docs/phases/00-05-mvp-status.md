@@ -68,6 +68,10 @@ Falta el orquestador de pagos (fase 6) para el happy path completo de transferen
 3. **API Gateway**: no hay borde único con rate limiting + validación JWT.
 4. **Risk**: no existe; payment-service en fase 6 puede stubear risk o arrancar risk en paralelo.
 5. **Tests**: unitarios en ledger; falta cobertura integración/E2E del flujo completo.
+   (Este gap específico se cerró en fase 9, etapa 2 — 2026-08-06 —
+   `tests/end-to-end/critical-flow.e2e-spec.ts`. Snapshot histórico de esta
+   sección se mantiene tal cual, ver `docs/KNOWLEDGE_BASE.md` para el estado
+   actual.)
 6. **account-service monedas**: alineado con ledger (EUR/USD/GBP/LatAm…); documentar límites de negocio por moneda.
 
 ## Siguiente fase
